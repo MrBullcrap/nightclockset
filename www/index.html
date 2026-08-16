@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Night Clock</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
+    <script src="cordova.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { background: #000; }
+        body { width: 100vw; height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: #000; font-family: 'Segoe UI', 'Trebuchet MS', sans-serif; overflow: hidden; touch-action: none; padding: 0; margin: 0; }
+        #bgCanvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+        #clock { text-align: center; line-height: 1; letter-spacing: 0.001em; transition: color 0.5s ease, font-family 0.3s ease, font-size 0.3s ease, font-weight 0.3s ease; user-select: none; -webkit-user-select: none; cursor: default; font-variant-numeric: tabular-nums; font-weight: 800; transform: scaleY(1.15); position: relative; z-index: 10; }
+        #status { position: absolute; top: 20px; left: 20px; font-size: 2vw; opacity: 0.3; color: #888; }
+        #settingsModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); z-index: 1000; overflow-y: auto; padding: 20px; }
+        #settingsModal.active { display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .settings-container { background-color: #1a1a1a; border-radius: 20px; padding: 30px; max-width: 90vw; width: 100%; max-height: 80vh; overflow-y: auto; border: 2px solid #333; }
+        .settings-title { font-size: 6vw; font-weight: bold; margin-bottom: 30px; text-align: center; color: #fff; }
+        .setting-item { margin-bottom: 25px; display: flex; flex-direction: column; gap: 10px; }
+        .setting-label { font-size: 4vw; color: #aaa; font-weight: 500; }
+        .setting-sublabel { font-size: 3vw; color: #888; }
+        .setting-options { display: flex; gap: 10px; flex-wrap: wrap; }
+        .option-btn { flex: 1; padding: 15px; font-size: 3vw; border: 2px solid #444; background-color: #222; color: #888; border-radius: 10px; cursor: pointer; min-width: 45%; }
+        .option-btn.active { background-color: #0088ff; color: #fff; border-color: #0088ff; }
+        input[type="color"] { width: 100%; height: 60px; border: 2px solid #444; border-radius: 10px; }
+        input[type="text"] { width: 100%; padding: 15px; font-size: 3vw; border: 2px solid #444; border-radius: 10px; background-color: #222; color: #fff; }
+        input[type="range"] { width: 100%; height: 10px; cursor: pointer; }
+        .toggle-btn { padding: 15px; font-size: 3vw; border: 2px solid #444; background-color: #222; color: #888; border-radius: 10px; cursor: pointer; width: 100%; }
+        .toggle-btn.on { background-color: #00aa44; color: #fff; border-color: #00aa44; }
+        .close-settings { margin-top: 30px; padding: 20px; font-size: 4vw; background-color: #0088ff; color: #fff; border: none; border-radius: 10px; cursor: pointer; width: 100%; font-weight: bold; }
+        html, body { width: 100%; height: 100%; position: fixed; top: 0; left: 0; }
+        .value-display { text-align: center; color: #aaa; font-size: 3vw; }
+    </style>
+</head>
+<body>
+    <canvas id="bgCanvas"></canvas>
+    <div id="status"></div>
+    <div id="clock">--:--</div>
+    <div id="settingsModal">
+        <div class="settings-container">
+            <div class="settings-title">Settings</div>
+
+            <!-- Clock Settings -->
+            <div class="setting-item">
+                <div class="setting-label">Font Size</div>
+                <div class="setting-options">
+                    <button class="option-btn" data-size="20">Small</button>
+                    <button class="option-btn" data-size="26">Medium</button>
+                    <button class="option-btn" data-size="32">Large</button>
+                    <button class="option-btn active" data-size="39">XLarge</button>
+                </div>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Font Weight</div>
+                <input type="range" id="fontWeightSlider" min="100" max="900" step="100" value="800">
+                <div id="fontWeightValue" class="value-display">800</div>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Font</div>
+                <div class="setting-options">
+                    <button class="option-btn active" data-font="'Segoe UI', 'Trebuchet MS', sans-serif">Modern</button>
+                    <button class="option-btn" data-font="'Courier New', monospace">Mono</button>
+                    <button class="option-btn" data-font="Georgia, serif">Serif</button>
+                    <button class="option-btn" data-font="'Arial Black', sans-serif">Bold</button>
+                </div>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Time Format</div>
+                <div class="setting-options">
+                    <button class="option-btn active" data-format="24">24 Hour</button>
+                    <button class="option-btn" data-format="12">12 Hour</button>
+                </div>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Show Seconds</div>
+                <button class="toggle-btn on" id="secondsToggle">ON</button>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Day Color</div>
+                <input type="color" id="dayColor" value="#ffffff">
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Night Color</div>
+                <input type="color" id="nightColor" value="#ff4444">
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Use Sunset/Sunrise</div>
+                <button class="toggle-btn on" id="locationToggle">ON</button>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Location (lat,lon)</div>
+                <input type="text" id="locationInput" placeholder="e.g., 52.1630,7.5886">
+            </div>
+            <!-- Brightness Control -->
+            <div class="setting-item">
+                <div class="setting-label">Screen Brightness</div>
+                <input type="range" id="brightnessSlider" min="30" max="255" step="5" value="128">
+                <div id="brightnessValue" class="value-display">128</div>
+            </div>
+            <!-- Background Animation Settings -->
+            <div class="setting-item">
+                <div class="setting-label">Animation Speed</div>
+                <input type="range" id="bgSpeedSlider" min="0.5" max="3" step="0.5" value="0.5">
+                <div id="bgSpeedValue" class="value-display">0.5x</div>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Background Intensity</div>
+                <input type="range" id="intensitySlider" min="0" max="100" step="10" value="70">
+                <div id="intensityValue" class="value-display">70%</div>
+            </div>
+
+            <!-- Bright Palette -->
+            <div class="setting-item">
+                <div class="setting-label">Bright Palette (Daytime)</div>
+                <div class="setting-sublabel">Color 1</div>
+                <input type="color" id="brightC1" value="#ffa366">
+                <div class="setting-sublabel">Color 2</div>
+                <input type="color" id="brightC2" value="#ff99cc">
+                <div class="setting-sublabel">Color 3</div>
+                <input type="color" id="brightC3" value="#ffcc99">
+            </div>
+
+            <!-- Medium Palette -->
+            <div class="setting-item">
+                <div class="setting-label">Medium Palette (Afternoon)</div>
+                <div class="setting-sublabel">Color 1</div>
+                <input type="color" id="mediumC1" value="#6699ff">
+                <div class="setting-sublabel">Color 2</div>
+                <input type="color" id="mediumC2" value="#9966ff">
+                <div class="setting-sublabel">Color 3</div>
+                <input type="color" id="mediumC3" value="#cc99ff">
+            </div>
+
+            <!-- Dark Palette -->
+            <div class="setting-item">
+                <div class="setting-label">Dark Palette (Nighttime)</div>
+                <div class="setting-sublabel">Color 1</div>
+                <input type="color" id="darkC1" value="#1a3a52">
+                <div class="setting-sublabel">Color 2</div>
+                <input type="color" id="darkC2" value="#2d1a52">
+                <div class="setting-sublabel">Color 3</div>
+                <input type="color" id="darkC3" value="#1a2d52">
+            </div>
+
+            <button class="close-settings" id="closeSettings">Close Settings</button>
+            <button class="close-settings" style="background-color: #00aa44;" id="pinAppBtn">Pin App to Screen</button>
+        </div>
+    </div>
+    <script>
+        const bgCanvas = document.getElementById('bgCanvas');
+        const bgCtx = bgCanvas.getContext('2d');
+
+        function resizeCanvas() {
+            bgCanvas.width = window.innerWidth;
+            bgCanvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 0, g: 0, b: 0 };
+        }
+
+        function rgbToHex(r, g, b) {
+            return "#" + ((1 << 24) + (Math.floor(r) << 16) + (Math.floor(g) << 8) + Math.floor(b)).toString(16).slice(1);
+        }
+
+        function interpolateColors(hex1, hex2, t) {
+            const c1 = hexToRgb(hex1);
+            const c2 = hexToRgb(hex2);
+            const r = lerp(c1.r, c2.r, t);
+            const g = lerp(c1.g, c2.g, t);
+            const b = lerp(c1.b, c2.b, t);
+            return rgbToHex(r, g, b);
+        }
+
+        function drawAnimatedBackground(time) {
+            const width = bgCanvas.width;
+            const height = bgCanvas.height;
+
+            const isNight = settings.useLocation && latitude && longitude && isNightTime(latitude, longitude);
+
+            if (isNight) {
+                bgCtx.fillStyle = '#000000';
+                bgCtx.fillRect(0, 0, width, height);
+                return;
+            }
+
+            const c1 = settings.brightC1;
+            const c2 = settings.brightC2;
+            const c3 = settings.brightC3;
+            const intensity = settings.bgIntensity / 100;
+
+            bgCtx.fillStyle = '#000';
+            bgCtx.fillRect(0, 0, width, height);
+
+            const angle1 = (time * settings.bgSpeed * 0.08) % 360;
+            const angle2 = (time * settings.bgSpeed * 0.06 + 120) % 360;
+            const angle3 = (time * settings.bgSpeed * 0.04 + 240) % 360;
+
+            const rad1 = (angle1 * Math.PI) / 180;
+            const rad2 = (angle2 * Math.PI) / 180;
+            const rad3 = (angle3 * Math.PI) / 180;
+
+            const endX1 = width * Math.cos(rad1);
+            const endY1 = height * Math.sin(rad1);
+            const grad1 = bgCtx.createLinearGradient(0, 0, endX1, endY1);
+            grad1.addColorStop(0, c1);
+            grad1.addColorStop(0.5, c2);
+            grad1.addColorStop(1, c3);
+            bgCtx.globalAlpha = 0.7 * intensity;
+            bgCtx.fillStyle = grad1;
+            bgCtx.fillRect(0, 0, width, height);
+
+            const endX2 = width * Math.cos(rad2);
+            const endY2 = height * Math.sin(rad2);
+            const grad2 = bgCtx.createLinearGradient(0, 0, endX2, endY2);
+            grad2.addColorStop(0, c2);
+            grad2.addColorStop(0.5, c3);
+            grad2.addColorStop(1, c1);
+            bgCtx.globalAlpha = 0.4 * intensity;
+            bgCtx.fillStyle = grad2;
+            bgCtx.fillRect(0, 0, width, height);
+
+            const radialGrad = bgCtx.createRadialGradient(
+                width / 2, height / 2, 0,
+                width / 2, height / 2, Math.max(width, height) * 0.8
+            );
+            radialGrad.addColorStop(0, c3);
+            radialGrad.addColorStop(1, c1);
+            bgCtx.globalAlpha = 0.3 * intensity;
+            bgCtx.fillStyle = radialGrad;
+            bgCtx.fillRect(0, 0, width, height);
+
+            bgCtx.globalAlpha = 1;
+        }
+
+        let animationTime = 0;
+        function startBackgroundAnimation() {
+            function animate() {
+                animationTime += 16 * settings.bgSpeed;
+                drawAnimatedBackground(animationTime);
+                requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        const clockElement = document.getElementById('clock');
+        const statusElement = document.getElementById('status');
+        const settingsModal = document.getElementById('settingsModal');
+        let latitude = null, longitude = null, isEveningMode = false, lastTapTime = 0;
+        let settings = {
+            font: "'Segoe UI', 'Trebuchet MS', sans-serif",
+            fontSize: 39,
+            fontWeight: 800,
+            timeFormat: 24,
+            showSeconds: true,
+            dayColor: '#ffffff',
+            nightColor: '#ff4444',
+            useLocation: true,
+            locationLat: null,
+            locationLon: null,
+            bgSpeed: 0.5,
+            bgIntensity: 70,
+            brightC1: '#ffa366',
+            brightC2: '#ff99cc',
+            brightC3: '#ffcc99',
+            mediumC1: '#6699ff',
+            mediumC2: '#9966ff',
+            mediumC3: '#cc99ff',
+            darkC1: '#1a3a52',
+            darkC2: '#2d1a52',
+            darkC3: '#1a2d52'
+        };
+
+        function requestFullscreen() {
+            document.documentElement.requestFullscreen().catch(() => {});
+            document.documentElement.style.height = '100vh';
+            document.body.style.height = '100vh';
+        }
+
+        function loadSettings() { const saved = localStorage.getItem('nightClockSettings'); if (saved) settings = { ...settings, ...JSON.parse(saved) }; applySettings(); }
+        function saveSettings() { localStorage.setItem('nightClockSettings', JSON.stringify(settings)); }
+        function applySettings() { clockElement.style.fontFamily = settings.font; clockElement.style.fontSize = settings.fontSize + 'vw'; clockElement.style.fontWeight = settings.fontWeight; if (settings.useLocation && latitude !== null) updateClockColor(); else if (!settings.useLocation) clockElement.style.color = settings.dayColor; }
+        function getSunTimes(lat, lon, date = new Date()) { const times = SunCalc.getTimes(date, lat, lon); return { sunrise: times.sunrise, sunset: times.sunset }; }
+        function isNightTime(lat, lon) { if (!lat || !lon) return false; const now = new Date(); const sunTimes = getSunTimes(lat, lon, now); return now < sunTimes.sunrise || now > sunTimes.sunset; }
+        function updateClockColor() { if (!settings.useLocation || latitude === null || longitude === null) return; const newEveningMode = isNightTime(latitude, longitude); if (newEveningMode !== isEveningMode) { isEveningMode = newEveningMode; clockElement.style.color = isEveningMode ? settings.nightColor : settings.dayColor; } }
+        function updateClock() { const now = new Date(); let hours = now.getHours(); const minutes = String(now.getMinutes()).padStart(2, '0'); const seconds = String(now.getSeconds()).padStart(2, '0'); if (settings.timeFormat === 12) { const ampm = hours >= 12 ? 'PM' : 'AM'; hours = hours % 12 || 12; hours = String(hours).padStart(2, '0'); } else { hours = String(hours).padStart(2, '0'); } let display = `${hours}:${minutes}`; if (settings.showSeconds) display += `:${seconds}`; clockElement.textContent = display; updateClockColor(); }
+        function requestLocation() { if (!settings.useLocation) { statusElement.textContent = ''; return; } if (settings.locationLat && settings.locationLon) { latitude = settings.locationLat; longitude = settings.locationLon; statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); return; } if (navigator.geolocation) { navigator.geolocation.getCurrentPosition((position) => { latitude = position.coords.latitude; longitude = position.coords.longitude; settings.locationLat = latitude; settings.locationLon = longitude; saveSettings(); statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); }, () => { statusElement.textContent = ''; }); } }
+        clockElement.addEventListener('touchend', (e) => { const now = Date.now(); if (now - lastTapTime < 300) { e.preventDefault(); openSettings(); } lastTapTime = now; });
+        function openSettings() { settingsModal.classList.add('active'); updateSettingsUI(); }
+        function closeSettings() { settingsModal.classList.remove('active'); saveSettings(); applySettings(); requestLocation(); requestFullscreen(); }
+        document.getElementById('closeSettings').addEventListener('click', closeSettings);
+        settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettings(); });
+        function updateSettingsUI() {
+            document.querySelectorAll('[data-size]').forEach(btn => { btn.classList.remove('active'); if (parseInt(btn.dataset.size) === settings.fontSize) btn.classList.add('active'); btn.onclick = () => { settings.fontSize = parseInt(btn.dataset.size); updateSettingsUI(); applySettings(); }; });
+
+            const fontWeightSlider = document.getElementById('fontWeightSlider');
+            const fontWeightValue = document.getElementById('fontWeightValue');
+            fontWeightSlider.value = settings.fontWeight;
+            fontWeightValue.textContent = settings.fontWeight;
+            fontWeightSlider.oninput = (e) => { settings.fontWeight = parseInt(e.target.value); fontWeightValue.textContent = settings.fontWeight; applySettings(); };
+
+            const bgSpeedSlider = document.getElementById('bgSpeedSlider');
+            const bgSpeedValue = document.getElementById('bgSpeedValue');
+            bgSpeedSlider.value = settings.bgSpeed;
+            bgSpeedValue.textContent = settings.bgSpeed + 'x';
+            bgSpeedSlider.oninput = (e) => { settings.bgSpeed = parseFloat(e.target.value); bgSpeedValue.textContent = settings.bgSpeed + 'x'; };
+
+            const intensitySlider = document.getElementById('intensitySlider');
+            const intensityValue = document.getElementById('intensityValue');
+            intensitySlider.value = settings.bgIntensity;
+            intensityValue.textContent = settings.bgIntensity + '%';
+            intensitySlider.oninput = (e) => { settings.bgIntensity = parseInt(e.target.value); intensityValue.textContent = settings.bgIntensity + '%'; };
+
+            document.querySelectorAll('[data-font]').forEach(btn => { btn.classList.remove('active'); if (btn.dataset.font === settings.font) btn.classList.add('active'); btn.onclick = () => { settings.font = btn.dataset.font; updateSettingsUI(); }; });
+            document.querySelectorAll('[data-format]').forEach(btn => { btn.classList.remove('active'); if (parseInt(btn.dataset.format) === settings.timeFormat) btn.classList.add('active'); btn.onclick = () => { settings.timeFormat = parseInt(btn.dataset.format); updateSettingsUI(); updateClock(); }; });
+            const secondsToggle = document.getElementById('secondsToggle'); secondsToggle.classList.toggle('on', settings.showSeconds); secondsToggle.textContent = settings.showSeconds ? 'ON' : 'OFF'; secondsToggle.onclick = () => { settings.showSeconds = !settings.showSeconds; updateSettingsUI(); updateClock(); };
+            document.getElementById('dayColor').value = settings.dayColor; document.getElementById('dayColor').onchange = (e) => { settings.dayColor = e.target.value; updateClock(); };
+            document.getElementById('nightColor').value = settings.nightColor; document.getElementById('nightColor').onchange = (e) => { settings.nightColor = e.target.value; updateClock(); };
+            const locationToggle = document.getElementById('locationToggle'); locationToggle.classList.toggle('on', settings.useLocation); locationToggle.textContent = settings.useLocation ? 'ON' : 'OFF'; locationToggle.onclick = () => { settings.useLocation = !settings.useLocation; updateSettingsUI(); updateClock(); };
+            const locationInput = document.getElementById('locationInput'); if (settings.locationLat && settings.locationLon) locationInput.value = `${settings.locationLat},${settings.locationLon}`; locationInput.onchange = (e) => { const [lat, lon] = e.target.value.split(',').map(s => parseFloat(s.trim())); if (!isNaN(lat) && !isNaN(lon)) { settings.locationLat = lat; settings.locationLon = lon; latitude = lat; longitude = lon; updateSettingsUI(); updateClock(); } };
+
+            document.getElementById('brightC1').value = settings.brightC1; document.getElementById('brightC1').onchange = (e) => { settings.brightC1 = e.target.value; };
+            document.getElementById('brightC2').value = settings.brightC2; document.getElementById('brightC2').onchange = (e) => { settings.brightC2 = e.target.value; };
+            document.getElementById('brightC3').value = settings.brightC3; document.getElementById('brightC3').onchange = (e) => { settings.brightC3 = e.target.value; };
+
+            document.getElementById('mediumC1').value = settings.mediumC1; document.getElementById('mediumC1').onchange = (e) => { settings.mediumC1 = e.target.value; };
+            document.getElementById('mediumC2').value = settings.mediumC2; document.getElementById('mediumC2').onchange = (e) => { settings.mediumC2 = e.target.value; };
+            document.getElementById('mediumC3').value = settings.mediumC3; document.getElementById('mediumC3').onchange = (e) => { settings.mediumC3 = e.target.value; };
+
+            document.getElementById('darkC1').value = settings.darkC1; document.getElementById('darkC1').onchange = (e) => { settings.darkC1 = e.target.value; };
+            document.getElementById('darkC2').value = settings.darkC2; document.getElementById('darkC2').onchange = (e) => { settings.darkC2 = e.target.value; };
+            document.getElementById('darkC3').value = settings.darkC3; document.getElementById('darkC3').onchange = (e) => { settings.darkC3 = e.target.value; };
+            document.getElementById('darkC3').value = settings.darkC3; document.getElementById('darkC3').onchange = (e) => { settings.darkC3 = e.target.value; };
+
+           const brightnessSlider = document.getElementById('brightnessSlider');
+            const brightnessValue = document.getElementById('brightnessValue');
+            
+            console.log("brightnessSlider element: " + brightnessSlider);
+            console.log("brightnessValue element: " + brightnessValue);
+            
+            if (!brightnessSlider) {
+                console.log("ERROR: brightnessSlider not found!");
+                return;
+            }
+            
+            brightnessSlider.oninput = (e) => { 
+                console.log("Slider moved to: " + e.target.value);
+                const brightness = parseInt(e.target.value);
+                brightnessValue.textContent = brightness;
+                if (cordova && cordova.plugins && cordova.plugins.Brightness) {
+                    cordova.plugins.Brightness.set(brightness, 
+                        () => console.log("Brightness set to " + brightness),
+                        (err) => console.log("Brightness error: " + err)
+                    );
+                }
+            };
+        }        
+
+        // Brightness control
+        let currentBrightness = 128;
+        let targetBrightness = 128;
+        
+        function updateBrightnessSmooth() {
+            // Smooth lerp between current and target
+            currentBrightness = lerp(currentBrightness, targetBrightness, 0.05);
+            
+            // Call brightness plugin
+            if (cordova && cordova.plugins && cordova.plugins.Brightness) {
+                cordova.plugins.Brightness.set(Math.floor(currentBrightness), 
+                    () => {},
+                    (err) => console.log("Brightness error: " + err)
+                );
+            }
+        }
+        
+        // Start smooth brightness updates
+        setInterval(updateBrightnessSmooth, 100);
+        
+        document.addEventListener('deviceready', function() {
+            console.log("Device ready!");
+            
+            // Start light sensor
+            if (cordova && cordova.plugins && cordova.plugins.LightSensor) {
+                console.log("Starting light sensor...");
+                cordova.plugins.LightSensor.start(
+                    function(data) {
+                        if (data && data.lux !== undefined) {
+                            console.log("Lux: " + data.lux);
+                            // Map lux (0-10000) to brightness (30-255)
+                            targetBrightness = Math.floor(30 + (Math.min(data.lux, 10000) / 10000) * 225);
+                            console.log("Target brightness: " + targetBrightness);
+                        }
+                    },
+                    function(error) { 
+                        console.log("Light sensor error: " + error); 
+                    }
+                );
+            } else {
+                console.log("Light sensor plugin NOT found!");
+            }
+            
+            document.getElementById('pinAppBtn').addEventListener('click', () => {
+                cordova.exec(
+                    function(success) { alert("SUCCESS: " + success); },
+                    function(error) { alert("ERROR: " + error); },
+                    "Screen",
+                    "pinApp",
+                    []
+                );
+            });
+        }, false);
+
+        loadSettings(); clockElement.style.color = settings.dayColor; requestLocation(); requestFullscreen(); setInterval(updateClock, 1000); updateClock(); startBackgroundAnimation();
+    </script>
+</body>
+</html>
