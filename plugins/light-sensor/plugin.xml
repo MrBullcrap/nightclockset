@@ -3,7 +3,11 @@
     <name>Light Sensor</name>
     <description>Read device light sensor</description>
     <license>Apache 2.0</license>
-    
+
+    <js-module src="www/light-sensor.js" name="LightSensor">
+        <clobbers target="cordova.plugins.LightSensor" />
+    </js-module>
+
     <platform name="android">
         <config-file target="config.xml" parent="/*">
             <feature name="LightSensor">
