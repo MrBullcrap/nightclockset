@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<plugin id="cordova-plugin-brightness" version="1.0.0" xmlns="http://apache.org/cordova/ns/plugins/1.0">
+    <name>Brightness Control</name>
+    <description>Control device brightness</description>
+    <license>Apache 2.0</license>
+    
+    <platform name="android">
+        <config-file target="config.xml" parent="/*">
+            <feature name="Brightness">
+                <param name="android-package" value="com.nightclockset.app.Brightness" />
+            </feature>
+        </config-file>
+        <source-file src="src/android/Brightness.java" target-dir="src/com/nightclockset/app" />
+    </platform>
+</plugin>

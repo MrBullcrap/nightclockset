@@ -1,0 +1,10 @@
+{
+  "name": "cordova-plugin-screen",
+  "version": "1.0.0",
+  "description": "Screen pinning plugin",
+  "cordova": {
+    "id": "cordova-plugin-screen",
+    "platforms": ["android"]
+  },
+  "license": "Apache 2.0"
+}

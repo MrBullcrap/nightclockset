@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<plugin id="cordova-plugin-screen" version="1.0.0" xmlns="http://apache.org/cordova/ns/plugins/1.0">
+    <name>Screen Pinning</name>
+    <description>Plugin for screen pinning</description>
+    <license>Apache 2.0</license>
+
+    <js-module src="www/screen.js" name="Screen">
+    <clobbers target="cordova.plugins.Screen" />
+</js-module>
+    
+    <platform name="android">
+        <config-file target="config.xml" parent="/*">
+            <feature name="Screen">
+                <param name="android-package" value="com.nightclockset.app.Screen" />
+            </feature>
+        </config-file>
+        <source-file src="src/android/Screen.java" target-dir="src/com/nightclockset/app" />
+    </platform>
+</plugin>

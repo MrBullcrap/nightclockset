@@ -1,0 +1,34 @@
+{
+  "com.nightclockset.app.screen": {
+    "source": {
+      "type": "local",
+      "path": "/home/peter/nightclockset-app/node_modules/cordova-plugin-screen"
+    },
+    "is_top_level": true,
+    "variables": {}
+  },
+  "cordova-plugin-screen": {
+    "source": {
+      "type": "local",
+      "path": "/home/peter/nightclockset-app/node_modules/cordova-plugin-screen"
+    },
+    "is_top_level": true,
+    "variables": {}
+  },
+  "cordova-plugin-brightness": {
+    "source": {
+      "type": "local",
+      "path": "/home/peter/nightclockset-app/node_modules/cordova-plugin-brightness"
+    },
+    "is_top_level": true,
+    "variables": {}
+  },
+  "cordova-plugin-light-sensor": {
+    "source": {
+      "type": "local",
+      "path": "/home/peter/nightclockset-app/node_modules/cordova-plugin-light-sensor"
+    },
+    "is_top_level": true,
+    "variables": {}
+  }
+}
