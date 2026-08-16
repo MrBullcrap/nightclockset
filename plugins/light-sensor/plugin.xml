@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<plugin id="cordova-plugin-light-sensor" version="1.0.0" xmlns="http://apache.org/cordova/ns/plugins/1.0">
+    <name>Light Sensor</name>
+    <description>Read device light sensor</description>
+    <license>Apache 2.0</license>
+
+    <js-module src="www/light-sensor.js" name="LightSensor">
+        <clobbers target="cordova.plugins.LightSensor" />
+    </js-module>
+
+    <platform name="android">
+        <config-file target="config.xml" parent="/*">
+            <feature name="LightSensor">
+                <param name="android-package" value="com.nightclockset.app.LightSensor" />
+            </feature>
+        </config-file>
+        <source-file src="src/android/LightSensor.java" target-dir="src/com/nightclockset/app" />
+    </platform>
+</plugin>

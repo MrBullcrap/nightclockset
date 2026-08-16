@@ -1,0 +1,10 @@
+{
+  "name": "cordova-plugin-brightness",
+  "version": "1.0.0",
+  "description": "Control device brightness",
+  "cordova": {
+    "id": "cordova-plugin-brightness",
+    "platforms": ["android"]
+  },
+  "license": "Apache 2.0"
+}

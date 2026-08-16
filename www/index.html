@@ -94,9 +94,30 @@
             </div>
             <!-- Brightness Control -->
             <div class="setting-item">
+                <div class="setting-label">Auto Brightness (Light Sensor)</div>
+                <button class="toggle-btn on" id="autoBrightnessToggle">ON</button>
+            </div>
+            <div class="setting-item">
                 <div class="setting-label">Screen Brightness</div>
                 <input type="range" id="brightnessSlider" min="30" max="255" step="5" value="128">
                 <div id="brightnessValue" class="value-display">128</div>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Minimum Brightness (When Lit)</div>
+                <div class="setting-sublabel">Auto brightness won't dim below this while there's ambient light</div>
+                <input type="range" id="minBrightnessWhenLitSlider" min="30" max="255" step="5" value="100">
+                <div id="minBrightnessWhenLitValue" class="value-display">100</div>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Dark Threshold (lux)</div>
+                <div class="setting-sublabel">Below this light level, the screen is allowed to fade to minimum brightness</div>
+                <input type="range" id="darkLuxThresholdSlider" min="0" max="50" step="1" value="5">
+                <div id="darkLuxThresholdValue" class="value-display">5</div>
+            </div>
+            <div class="setting-item">
+                <div class="setting-label">Brightness Auto-Recovery</div>
+                <div class="setting-sublabel">Lets the app recover if the system brightness slider gets stuck overriding it</div>
+                <button class="toggle-btn" id="writeSettingsBtn">Checking...</button>
             </div>
             <!-- Background Animation Settings -->
             <div class="setting-item">
@@ -272,6 +293,10 @@
             locationLon: null,
             bgSpeed: 0.5,
             bgIntensity: 70,
+            brightness: 128,
+            autoBrightness: true,
+            minBrightnessWhenLit: 100,
+            darkLuxThreshold: 5,
             brightC1: '#ffa366',
             brightC2: '#ff99cc',
             brightC3: '#ffcc99',
@@ -344,29 +369,58 @@
             document.getElementById('darkC3').value = settings.darkC3; document.getElementById('darkC3').onchange = (e) => { settings.darkC3 = e.target.value; };
             document.getElementById('darkC3').value = settings.darkC3; document.getElementById('darkC3').onchange = (e) => { settings.darkC3 = e.target.value; };
 
-           const brightnessSlider = document.getElementById('brightnessSlider');
+            const autoBrightnessToggle = document.getElementById('autoBrightnessToggle');
+            autoBrightnessToggle.classList.toggle('on', settings.autoBrightness);
+            autoBrightnessToggle.textContent = settings.autoBrightness ? 'ON' : 'OFF';
+            autoBrightnessToggle.onclick = () => { settings.autoBrightness = !settings.autoBrightness; updateSettingsUI(); applyAutoBrightness(); };
+
+            const brightnessSlider = document.getElementById('brightnessSlider');
             const brightnessValue = document.getElementById('brightnessValue');
-            
-            console.log("brightnessSlider element: " + brightnessSlider);
-            console.log("brightnessValue element: " + brightnessValue);
-            
-            if (!brightnessSlider) {
-                console.log("ERROR: brightnessSlider not found!");
+            brightnessSlider.value = settings.brightness;
+            brightnessValue.textContent = settings.brightness;
+            brightnessSlider.oninput = (e) => {
+                const brightness = parseInt(e.target.value);
+                settings.brightness = brightness;
+                brightnessValue.textContent = brightness;
+                if (!settings.autoBrightness) targetBrightness = brightness;
+            };
+
+            const minBrightnessWhenLitSlider = document.getElementById('minBrightnessWhenLitSlider');
+            const minBrightnessWhenLitValue = document.getElementById('minBrightnessWhenLitValue');
+            minBrightnessWhenLitSlider.value = settings.minBrightnessWhenLit;
+            minBrightnessWhenLitValue.textContent = settings.minBrightnessWhenLit;
+            minBrightnessWhenLitSlider.oninput = (e) => { settings.minBrightnessWhenLit = parseInt(e.target.value); minBrightnessWhenLitValue.textContent = settings.minBrightnessWhenLit; };
+
+            const darkLuxThresholdSlider = document.getElementById('darkLuxThresholdSlider');
+            const darkLuxThresholdValue = document.getElementById('darkLuxThresholdValue');
+            darkLuxThresholdSlider.value = settings.darkLuxThreshold;
+            darkLuxThresholdValue.textContent = settings.darkLuxThreshold;
+            darkLuxThresholdSlider.oninput = (e) => { settings.darkLuxThreshold = parseInt(e.target.value); darkLuxThresholdValue.textContent = settings.darkLuxThreshold; };
+
+            updateWriteSettingsUI();
+        }
+
+        function updateWriteSettingsUI() {
+            const btn = document.getElementById('writeSettingsBtn');
+            if (!cordova || !cordova.plugins || !cordova.plugins.Brightness || !cordova.plugins.Brightness.canWriteSettings) {
+                btn.textContent = 'Unavailable';
+                btn.onclick = null;
                 return;
             }
-            
-            brightnessSlider.oninput = (e) => { 
-                console.log("Slider moved to: " + e.target.value);
-                const brightness = parseInt(e.target.value);
-                brightnessValue.textContent = brightness;
-                if (cordova && cordova.plugins && cordova.plugins.Brightness) {
-                    cordova.plugins.Brightness.set(brightness, 
-                        () => console.log("Brightness set to " + brightness),
-                        (err) => console.log("Brightness error: " + err)
-                    );
+            cordova.plugins.Brightness.canWriteSettings((canWrite) => {
+                if (canWrite) {
+                    btn.classList.add('on');
+                    btn.textContent = 'ENABLED';
+                    btn.onclick = null;
+                } else {
+                    btn.classList.remove('on');
+                    btn.textContent = 'Tap to Enable';
+                    btn.onclick = () => {
+                        cordova.plugins.Brightness.requestWriteSettings(() => {}, () => {});
+                    };
                 }
-            };
-        }        
+            }, () => { btn.textContent = 'Error'; });
+        }
 
         // Brightness control
         let currentBrightness = 128;
@@ -387,30 +441,35 @@
         
         // Start smooth brightness updates
         setInterval(updateBrightnessSmooth, 100);
-        
-        document.addEventListener('deviceready', function() {
-            console.log("Device ready!");
-            
-            // Start light sensor
-            if (cordova && cordova.plugins && cordova.plugins.LightSensor) {
-                console.log("Starting light sensor...");
+
+        function applyAutoBrightness() {
+            if (!cordova || !cordova.plugins || !cordova.plugins.LightSensor) return;
+            if (settings.autoBrightness) {
                 cordova.plugins.LightSensor.start(
                     function(data) {
                         if (data && data.lux !== undefined) {
-                            console.log("Lux: " + data.lux);
                             // Map lux (0-10000) to brightness (30-255)
-                            targetBrightness = Math.floor(30 + (Math.min(data.lux, 10000) / 10000) * 225);
-                            console.log("Target brightness: " + targetBrightness);
+                            let mapped = Math.floor(30 + (Math.min(data.lux, 10000) / 10000) * 225);
+                            // Only let it fade all the way to minimum once the room is
+                            // actually dark; any detectable light keeps a readable floor.
+                            if (data.lux > settings.darkLuxThreshold) {
+                                mapped = Math.max(mapped, settings.minBrightnessWhenLit);
+                            }
+                            targetBrightness = mapped;
                         }
                     },
-                    function(error) { 
-                        console.log("Light sensor error: " + error); 
-                    }
+                    function(error) { console.log("Light sensor error: " + error); }
                 );
             } else {
-                console.log("Light sensor plugin NOT found!");
+                cordova.plugins.LightSensor.stop();
+                targetBrightness = settings.brightness;
             }
-            
+        }
+
+        document.addEventListener('deviceready', function() {
+            console.log("Device ready!");
+            applyAutoBrightness();
+
             document.getElementById('pinAppBtn').addEventListener('click', () => {
                 cordova.exec(
                     function(success) { alert("SUCCESS: " + success); },
