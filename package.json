@@ -2,7 +2,7 @@
   "name": "com.nightclockset.app",
   "displayName": "NightClockSet",
   "version": "1.0.0",
-  "description": "A sample Apache Cordova application that responds to the deviceready event.",
+  "description": "Night clock app for Android",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -15,21 +15,21 @@
   "devDependencies": {
     "cordova-android": "^13.0.0",
     "cordova-plugin-brightness": "file:plugins/brightness-control",
+    "cordova-plugin-geolocation": "^4.1.0",
     "cordova-plugin-light-sensor": "file:plugins/light-sensor",
-    "cordova-plugin-screen": "file:plugins/screen-pin",
-    "light-sensor": "./plugins/light-sensor",
-    "screen": "./plugins/screen-pin"
+    "cordova-plugin-screen": "file:plugins/screen-pin"
   },
   "cordova": {
     "platforms": [
       "android"
     ],
     "plugins": {
-      "screen": {},
       "cordova-plugin-screen": {},
+      "cordova-plugin-light-sensor": {},
       "cordova-plugin-brightness": {},
-      "light-sensor": {},
-      "cordova-plugin-light-sensor": {}
+      "cordova-plugin-geolocation": {
+        "GPS_REQUIRED": "false"
+      }
     }
   }
 }

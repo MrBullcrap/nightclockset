@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <widget id="com.nightclockset.app" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
     <name>NightClockSet</name>
-    <description>Sample Apache Cordova App</description>
+    <description>Night clock app for Android</description>
     <author email="dev@cordova.apache.org" href="https://cordova.apache.org">
         Apache Cordova Team
     </author>
@@ -15,6 +15,10 @@
     <preference name="StatusBarStyle" value="blacktransparent" />
     <preference name="android.useAndroidX" value="true" />
     <preference name="immersive" value="true" />
-    <plugin name="screen" spec="./plugins/screen-pin" />
-    <plugin name="light-sensor" spec="./plugins/light-sensor" />
+    <plugin name="cordova-plugin-screen" spec="./plugins/screen-pin" />
+    <plugin name="cordova-plugin-light-sensor" spec="./plugins/light-sensor" />
+    <plugin name="cordova-plugin-brightness" spec="./plugins/brightness-control" />
+    <plugin name="cordova-plugin-geolocation" spec="^4.1.0">
+        <variable name="GPS_REQUIRED" value="false" />
+    </plugin>
 </widget>
