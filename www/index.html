@@ -24,7 +24,7 @@
         .option-btn { flex: 1; padding: 15px; font-size: 3vw; border: 2px solid #444; background-color: #222; color: #888; border-radius: 10px; cursor: pointer; min-width: 45%; }
         .option-btn.active { background-color: #0088ff; color: #fff; border-color: #0088ff; }
         input[type="color"] { width: 100%; height: 60px; border: 2px solid #444; border-radius: 10px; }
-        input[type="text"] { width: 100%; padding: 15px; font-size: 3vw; border: 2px solid #444; border-radius: 10px; background-color: #222; color: #fff; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 15px; font-size: 3vw; border: 2px solid #444; border-radius: 10px; background-color: #222; color: #fff; }
         input[type="range"] { width: 100%; height: 10px; cursor: pointer; }
         .toggle-btn { padding: 15px; font-size: 3vw; border: 2px solid #444; background-color: #222; color: #888; border-radius: 10px; cursor: pointer; width: 100%; }
         .toggle-btn.on { background-color: #00aa44; color: #fff; border-color: #00aa44; }
@@ -130,38 +130,19 @@
                 <input type="range" id="intensitySlider" min="0" max="100" step="10" value="70">
                 <div id="intensityValue" class="value-display">70%</div>
             </div>
-
-            <!-- Bright Palette -->
             <div class="setting-item">
-                <div class="setting-label">Bright Palette (Daytime)</div>
-                <div class="setting-sublabel">Color 1</div>
-                <input type="color" id="brightC1" value="#ffa366">
-                <div class="setting-sublabel">Color 2</div>
-                <input type="color" id="brightC2" value="#ff99cc">
-                <div class="setting-sublabel">Color 3</div>
-                <input type="color" id="brightC3" value="#ffcc99">
+                <div class="setting-label">Preset Interval (seconds)</div>
+                <div class="setting-sublabel">How long each color preset stays active before changing</div>
+                <input type="number" id="presetIntervalInput" min="5" step="1" value="60">
             </div>
-
-            <!-- Medium Palette -->
             <div class="setting-item">
-                <div class="setting-label">Medium Palette (Afternoon)</div>
-                <div class="setting-sublabel">Color 1</div>
-                <input type="color" id="mediumC1" value="#6699ff">
-                <div class="setting-sublabel">Color 2</div>
-                <input type="color" id="mediumC2" value="#9966ff">
-                <div class="setting-sublabel">Color 3</div>
-                <input type="color" id="mediumC3" value="#cc99ff">
+                <div class="setting-label">Preset Transition Duration (seconds)</div>
+                <div class="setting-sublabel">How long the colors take to change, one by one, into the next preset</div>
+                <input type="number" id="transitionDurationInput" min="1" step="1" value="20">
             </div>
-
-            <!-- Dark Palette -->
             <div class="setting-item">
-                <div class="setting-label">Dark Palette (Nighttime)</div>
-                <div class="setting-sublabel">Color 1</div>
-                <input type="color" id="darkC1" value="#1a3a52">
-                <div class="setting-sublabel">Color 2</div>
-                <input type="color" id="darkC2" value="#2d1a52">
-                <div class="setting-sublabel">Color 3</div>
-                <input type="color" id="darkC3" value="#1a2d52">
+                <div class="setting-label">Color Presets</div>
+                <div id="paletteEditor"></div>
             </div>
 
             <button class="close-settings" id="closeSettings">Close Settings</button>
@@ -205,6 +186,80 @@
             return rgbToHex(r, g, b);
         }
 
+        // Five curated 5-color palettes. The background continuously shuffles
+        // through them, staying on each for settings.presetIntervalSeconds,
+        // then changing color-by-color (staggered, not all at once) into the
+        // next one over settings.transitionDurationSeconds. Independently,
+        // it also slowly drifts through the active palette's own colors so
+        // all five actually get used over time. Editable in Settings.
+        const PALETTE_NAMES = ['Aurora Night', 'Midnight Velvet', 'Tropical Nightfall', 'Dusk Sunset', 'Galactic Berry'];
+        const DEFAULT_PALETTES = [
+            ['#1b1f3a', '#3a2a7a', '#6d42c7', '#22d3ee', '#a7f3d0'],
+            ['#05070f', '#1b1035', '#3b1d6b', '#7c3aed', '#f0abfc'],
+            ['#072146', '#0b5fff', '#00c2ff', '#00d084', '#f9c74f'],
+            ['#db062f', '#f08118', '#fae00c', '#cd128b', '#f8d77b'],
+            ['#0a0f2c', '#2b1055', '#5b21b6', '#db2777', '#fbcfe8']
+        ];
+
+        function pickNextPalette(excludeIndex) {
+            if (DEFAULT_PALETTES.length <= 1) return excludeIndex;
+            let idx;
+            do { idx = Math.floor(Math.random() * DEFAULT_PALETTES.length); } while (idx === excludeIndex);
+            return idx;
+        }
+
+        let paletteCurrent = Math.floor(Math.random() * DEFAULT_PALETTES.length);
+        let paletteNext = pickNextPalette(paletteCurrent);
+        let palettePhaseStart = Date.now();
+
+        // Blends fromPalette into toPalette one color at a time (staggered,
+        // overlapping cascade) rather than all colors fading simultaneously.
+        function getStaggeredBlend(fromPalette, toPalette, t) {
+            const n = fromPalette.length;
+            const fadeFraction = 0.4; // each color's own fade covers 40% of the transition
+            const staggerStep = n > 1 ? (1 - fadeFraction) / (n - 1) : 0;
+            const blended = [];
+            for (let i = 0; i < n; i++) {
+                let localT = (t - i * staggerStep) / fadeFraction;
+                localT = Math.max(0, Math.min(1, localT));
+                blended.push(interpolateColors(fromPalette[i], toPalette[i], localT));
+            }
+            return blended;
+        }
+
+        // Returns the palette currently in effect (possibly mid-transition).
+        function updatePaletteState() {
+            const intervalMs = Math.max(1, settings.presetIntervalSeconds) * 1000;
+            const transitionMs = Math.min(Math.max(1, settings.transitionDurationSeconds) * 1000, intervalMs);
+            const elapsed = Date.now() - palettePhaseStart;
+
+            if (elapsed >= intervalMs) {
+                paletteCurrent = paletteNext;
+                paletteNext = pickNextPalette(paletteCurrent);
+                palettePhaseStart = Date.now();
+                return settings.palettes[paletteCurrent];
+            }
+
+            const transitionStart = intervalMs - transitionMs;
+            if (elapsed <= transitionStart) {
+                return settings.palettes[paletteCurrent];
+            }
+
+            const t = (elapsed - transitionStart) / transitionMs;
+            return getStaggeredBlend(settings.palettes[paletteCurrent], settings.palettes[paletteNext], t);
+        }
+
+        function samplePaletteColors(palette, phase) {
+            const pick = (offset) => {
+                const p = (phase + offset) % 1;
+                const scaled = p * palette.length;
+                const i = Math.floor(scaled) % palette.length;
+                const j = (i + 1) % palette.length;
+                return interpolateColors(palette[i], palette[j], scaled - Math.floor(scaled));
+            };
+            return [pick(0), pick(1 / 3), pick(2 / 3)];
+        }
+
         function drawAnimatedBackground(time) {
             const width = bgCanvas.width;
             const height = bgCanvas.height;
@@ -217,9 +272,9 @@
                 return;
             }
 
-            const c1 = settings.brightC1;
-            const c2 = settings.brightC2;
-            const c3 = settings.brightC3;
+            const effectivePalette = updatePaletteState();
+            const colorPhase = (colorTime * 0.00003) % 1;
+            const [c1, c2, c3] = samplePaletteColors(effectivePalette, colorPhase);
             const intensity = settings.bgIntensity / 100;
 
             bgCtx.fillStyle = '#000';
@@ -267,9 +322,11 @@
         }
 
         let animationTime = 0;
+        let colorTime = 0;
         function startBackgroundAnimation() {
             function animate() {
                 animationTime += 16 * settings.bgSpeed;
+                colorTime += 16; // independent of Animation Speed: color timing is real-time only
                 drawAnimatedBackground(animationTime);
                 requestAnimationFrame(animate);
             }
@@ -297,15 +354,9 @@
             autoBrightness: true,
             minBrightnessWhenLit: 100,
             darkLuxThreshold: 5,
-            brightC1: '#ffa366',
-            brightC2: '#ff99cc',
-            brightC3: '#ffcc99',
-            mediumC1: '#6699ff',
-            mediumC2: '#9966ff',
-            mediumC3: '#cc99ff',
-            darkC1: '#1a3a52',
-            darkC2: '#2d1a52',
-            darkC3: '#1a2d52'
+            presetIntervalSeconds: 60,
+            transitionDurationSeconds: 20,
+            palettes: DEFAULT_PALETTES.map(p => p.slice())
         };
 
         function requestFullscreen() {
@@ -348,6 +399,27 @@
             intensityValue.textContent = settings.bgIntensity + '%';
             intensitySlider.oninput = (e) => { settings.bgIntensity = parseInt(e.target.value); intensityValue.textContent = settings.bgIntensity + '%'; };
 
+            const presetIntervalInput = document.getElementById('presetIntervalInput');
+            presetIntervalInput.value = settings.presetIntervalSeconds;
+            presetIntervalInput.onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) settings.presetIntervalSeconds = v; };
+
+            const transitionDurationInput = document.getElementById('transitionDurationInput');
+            transitionDurationInput.value = settings.transitionDurationSeconds;
+            transitionDurationInput.onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) settings.transitionDurationSeconds = v; };
+
+            const paletteEditor = document.getElementById('paletteEditor');
+            paletteEditor.innerHTML = settings.palettes.map((palette, p) => `
+                <div class="setting-sublabel">${PALETTE_NAMES[p]}</div>
+                <div class="setting-options">
+                    ${palette.map((color, c) => `<input type="color" data-preset="${p}" data-color="${c}" value="${color}" style="width:50px;height:50px;flex:0 0 auto;">`).join('')}
+                </div>
+            `).join('');
+            paletteEditor.querySelectorAll('input[type="color"]').forEach(input => {
+                input.onchange = (e) => {
+                    settings.palettes[parseInt(input.dataset.preset)][parseInt(input.dataset.color)] = e.target.value;
+                };
+            });
+
             document.querySelectorAll('[data-font]').forEach(btn => { btn.classList.remove('active'); if (btn.dataset.font === settings.font) btn.classList.add('active'); btn.onclick = () => { settings.font = btn.dataset.font; updateSettingsUI(); }; });
             document.querySelectorAll('[data-format]').forEach(btn => { btn.classList.remove('active'); if (parseInt(btn.dataset.format) === settings.timeFormat) btn.classList.add('active'); btn.onclick = () => { settings.timeFormat = parseInt(btn.dataset.format); updateSettingsUI(); updateClock(); }; });
             const secondsToggle = document.getElementById('secondsToggle'); secondsToggle.classList.toggle('on', settings.showSeconds); secondsToggle.textContent = settings.showSeconds ? 'ON' : 'OFF'; secondsToggle.onclick = () => { settings.showSeconds = !settings.showSeconds; updateSettingsUI(); updateClock(); };
@@ -355,19 +427,6 @@
             document.getElementById('nightColor').value = settings.nightColor; document.getElementById('nightColor').onchange = (e) => { settings.nightColor = e.target.value; updateClock(); };
             const locationToggle = document.getElementById('locationToggle'); locationToggle.classList.toggle('on', settings.useLocation); locationToggle.textContent = settings.useLocation ? 'ON' : 'OFF'; locationToggle.onclick = () => { settings.useLocation = !settings.useLocation; updateSettingsUI(); updateClock(); };
             const locationInput = document.getElementById('locationInput'); if (settings.locationLat && settings.locationLon) locationInput.value = `${settings.locationLat},${settings.locationLon}`; locationInput.onchange = (e) => { const [lat, lon] = e.target.value.split(',').map(s => parseFloat(s.trim())); if (!isNaN(lat) && !isNaN(lon)) { settings.locationLat = lat; settings.locationLon = lon; latitude = lat; longitude = lon; updateSettingsUI(); updateClock(); } };
-
-            document.getElementById('brightC1').value = settings.brightC1; document.getElementById('brightC1').onchange = (e) => { settings.brightC1 = e.target.value; };
-            document.getElementById('brightC2').value = settings.brightC2; document.getElementById('brightC2').onchange = (e) => { settings.brightC2 = e.target.value; };
-            document.getElementById('brightC3').value = settings.brightC3; document.getElementById('brightC3').onchange = (e) => { settings.brightC3 = e.target.value; };
-
-            document.getElementById('mediumC1').value = settings.mediumC1; document.getElementById('mediumC1').onchange = (e) => { settings.mediumC1 = e.target.value; };
-            document.getElementById('mediumC2').value = settings.mediumC2; document.getElementById('mediumC2').onchange = (e) => { settings.mediumC2 = e.target.value; };
-            document.getElementById('mediumC3').value = settings.mediumC3; document.getElementById('mediumC3').onchange = (e) => { settings.mediumC3 = e.target.value; };
-
-            document.getElementById('darkC1').value = settings.darkC1; document.getElementById('darkC1').onchange = (e) => { settings.darkC1 = e.target.value; };
-            document.getElementById('darkC2').value = settings.darkC2; document.getElementById('darkC2').onchange = (e) => { settings.darkC2 = e.target.value; };
-            document.getElementById('darkC3').value = settings.darkC3; document.getElementById('darkC3').onchange = (e) => { settings.darkC3 = e.target.value; };
-            document.getElementById('darkC3').value = settings.darkC3; document.getElementById('darkC3').onchange = (e) => { settings.darkC3 = e.target.value; };
 
             const autoBrightnessToggle = document.getElementById('autoBrightnessToggle');
             autoBrightnessToggle.classList.toggle('on', settings.autoBrightness);
