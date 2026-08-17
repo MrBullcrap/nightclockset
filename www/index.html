@@ -215,6 +215,10 @@
 
                 <!-- Background Animation Settings -->
                 <section class="tab-panel" data-panel="ambient" hidden>
+                    <div class="row row-inline">
+                        <div class="field-label">Moon Phase Ring<span class="field-sub">Glowing corona at the edge, matching tonight's moon</span></div>
+                        <button class="switch on" id="moonRingToggle" role="switch" aria-checked="true"><span class="knob"></span></button>
+                    </div>
                     <div class="row">
                         <div class="row-top"><span class="field-label">Animation Speed</span><span id="bgSpeedValue" class="field-value mono">0.5x</span></div>
                         <input type="range" class="slider" id="bgSpeedSlider" min="0.5" max="3" step="0.5" value="0.5">
@@ -249,9 +253,70 @@
         const bgCanvas = document.getElementById('bgCanvas');
         const bgCtx = bgCanvas.getContext('2d');
 
+        // Fraction of the moon's disc currently illuminated (0 = new moon, 1 = full moon),
+        // and the offscreen canvas its glowing "corona" ring is pre-rendered onto so the
+        // layered-gradient draw only happens when the phase or canvas size changes,
+        // not on every animation frame.
+        let moonFraction = 0;
+        let moonRingCanvas = null;
+        let moonRingCtx = null;
+
+        function refreshMoonRing() {
+            const width = bgCanvas.width, height = bgCanvas.height;
+            if (!moonRingCanvas || moonRingCanvas.width !== width || moonRingCanvas.height !== height) {
+                moonRingCanvas = document.createElement('canvas');
+                moonRingCanvas.width = width;
+                moonRingCanvas.height = height;
+                moonRingCtx = moonRingCanvas.getContext('2d');
+            }
+            const ctx = moonRingCtx;
+            ctx.clearRect(0, 0, width, height);
+
+            const sweep = moonFraction * Math.PI * 2;
+            if (sweep <= 0.001) return;
+
+            const cx = width / 2, cy = height / 2;
+            const radius = Math.min(width, height) / 2 * 0.94;
+            const startAngle = -Math.PI / 2;
+            const segments = 72;
+            const fadeFraction = 0.18;
+            const applyEdgeFade = moonFraction < 0.98; // a full ring shouldn't have a seam where it meets itself
+
+            // Several concentric strokes of increasing width and decreasing alpha, blended
+            // additively, fake the soft radial falloff of an eclipse corona instead of one
+            // hard-edged line. Each is also split into small segments so the two ends of
+            // the arc fade in/out smoothly rather than cutting off abruptly.
+            const layers = [
+                { width: 1.5, alpha: 0.6 },
+                { width: 6, alpha: 0.22 },
+                { width: 14, alpha: 0.09 },
+                { width: 26, alpha: 0.04 }
+            ];
+
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.lineCap = 'round';
+
+            layers.forEach(layer => {
+                for (let i = 0; i < segments; i++) {
+                    const t0 = i / segments;
+                    const t1 = (i + 1) / segments;
+                    const tMid = (t0 + t1) / 2;
+                    const edgeFade = applyEdgeFade ? Math.max(0, Math.min(tMid / fadeFraction, (1 - tMid) / fadeFraction, 1)) : 1;
+                    const alpha = layer.alpha * edgeFade;
+                    if (alpha <= 0.003) continue;
+                    ctx.beginPath();
+                    ctx.strokeStyle = `rgba(210, 222, 255, ${alpha})`;
+                    ctx.lineWidth = layer.width;
+                    ctx.arc(cx, cy, radius, startAngle + sweep * t0, startAngle + sweep * t1);
+                    ctx.stroke();
+                }
+            });
+        }
+
         function resizeCanvas() {
             bgCanvas.width = window.innerWidth;
             bgCanvas.height = window.innerHeight;
+            refreshMoonRing();
         }
         resizeCanvas();
         window.addEventListener('resize', resizeCanvas);
@@ -356,36 +421,23 @@
             return [pick(0), pick(1 / 3), pick(2 / 3)];
         }
 
-        // Fraction of the moon's disc currently illuminated (0 = new moon, 1 = full moon).
         // Recomputed once a second in updateClock() rather than every animation frame.
-        let moonFraction = 0;
         function updateMoonPhase() {
             if (typeof SunCalc.getMoonIllumination === 'function') {
                 moonFraction = SunCalc.getMoonIllumination(new Date()).fraction;
             }
+            refreshMoonRing();
         }
 
-        // Thin glowing ring hugging the edge of the round display, only during night mode.
-        // Its sweep length tracks tonight's real moon phase (full ring at full moon, a
-        // sliver near new moon), with a slow independent breathing glow on top.
+        // Blends the pre-rendered corona (see refreshMoonRing) onto the night background,
+        // with a slow independent breathing glow driven by colorTime so it's unaffected by
+        // the Animation Speed setting.
         function drawMoonRing(width, height) {
-            const sweep = moonFraction * Math.PI * 2;
-            if (sweep <= 0.001) return;
-
-            const cx = width / 2, cy = height / 2;
-            const radius = Math.min(width, height) / 2 * 0.94;
-            const startAngle = -Math.PI / 2;
+            if (!settings.showMoonRing || !moonRingCanvas || moonFraction <= 0.001) return;
             const pulse = 0.55 + 0.45 * Math.sin(colorTime * 0.0005);
-
             bgCtx.save();
-            bgCtx.lineCap = 'round';
-            bgCtx.lineWidth = 3;
-            bgCtx.shadowColor = 'rgba(200, 215, 255, 0.9)';
-            bgCtx.shadowBlur = 18 * pulse;
-            bgCtx.strokeStyle = `rgba(210, 222, 255, ${0.15 + 0.35 * pulse})`;
-            bgCtx.beginPath();
-            bgCtx.arc(cx, cy, radius, startAngle, startAngle + sweep);
-            bgCtx.stroke();
+            bgCtx.globalAlpha = pulse;
+            bgCtx.drawImage(moonRingCanvas, 0, 0);
             bgCtx.restore();
         }
 
@@ -486,6 +538,7 @@
             darkLuxThreshold: 5,
             presetIntervalSeconds: 60,
             transitionDurationSeconds: 20,
+            showMoonRing: true,
             palettes: DEFAULT_PALETTES.map(p => p.slice())
         };
 
@@ -561,6 +614,11 @@
             const transitionDurationInput = document.getElementById('transitionDurationInput');
             transitionDurationInput.value = settings.transitionDurationSeconds;
             transitionDurationInput.onchange = (e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v > 0) settings.transitionDurationSeconds = v; };
+
+            const moonRingToggle = document.getElementById('moonRingToggle');
+            moonRingToggle.classList.toggle('on', settings.showMoonRing);
+            moonRingToggle.setAttribute('aria-checked', settings.showMoonRing);
+            moonRingToggle.onclick = () => { settings.showMoonRing = !settings.showMoonRing; updateSettingsUI(); };
 
             const paletteEditor = document.getElementById('paletteEditor');
             paletteEditor.innerHTML = settings.palettes.map((palette, p) => `
