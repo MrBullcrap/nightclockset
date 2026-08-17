@@ -356,6 +356,39 @@
             return [pick(0), pick(1 / 3), pick(2 / 3)];
         }
 
+        // Fraction of the moon's disc currently illuminated (0 = new moon, 1 = full moon).
+        // Recomputed once a second in updateClock() rather than every animation frame.
+        let moonFraction = 0;
+        function updateMoonPhase() {
+            if (typeof SunCalc.getMoonIllumination === 'function') {
+                moonFraction = SunCalc.getMoonIllumination(new Date()).fraction;
+            }
+        }
+
+        // Thin glowing ring hugging the edge of the round display, only during night mode.
+        // Its sweep length tracks tonight's real moon phase (full ring at full moon, a
+        // sliver near new moon), with a slow independent breathing glow on top.
+        function drawMoonRing(width, height) {
+            const sweep = moonFraction * Math.PI * 2;
+            if (sweep <= 0.001) return;
+
+            const cx = width / 2, cy = height / 2;
+            const radius = Math.min(width, height) / 2 * 0.94;
+            const startAngle = -Math.PI / 2;
+            const pulse = 0.55 + 0.45 * Math.sin(colorTime * 0.0005);
+
+            bgCtx.save();
+            bgCtx.lineCap = 'round';
+            bgCtx.lineWidth = 3;
+            bgCtx.shadowColor = 'rgba(200, 215, 255, 0.9)';
+            bgCtx.shadowBlur = 18 * pulse;
+            bgCtx.strokeStyle = `rgba(210, 222, 255, ${0.15 + 0.35 * pulse})`;
+            bgCtx.beginPath();
+            bgCtx.arc(cx, cy, radius, startAngle, startAngle + sweep);
+            bgCtx.stroke();
+            bgCtx.restore();
+        }
+
         function drawAnimatedBackground(time) {
             const width = bgCanvas.width;
             const height = bgCanvas.height;
@@ -365,6 +398,7 @@
             if (isNight) {
                 bgCtx.fillStyle = '#000000';
                 bgCtx.fillRect(0, 0, width, height);
+                drawMoonRing(width, height);
                 return;
             }
 
@@ -467,7 +501,7 @@
         function getSunTimes(lat, lon, date = new Date()) { const times = SunCalc.getTimes(date, lat, lon); return { sunrise: times.sunrise, sunset: times.sunset }; }
         function isNightTime(lat, lon) { if (!lat || !lon) return false; const now = new Date(); const sunTimes = getSunTimes(lat, lon, now); return now < sunTimes.sunrise || now > sunTimes.sunset; }
         function updateClockColor() { if (!settings.useLocation || latitude === null || longitude === null) return; const newEveningMode = isNightTime(latitude, longitude); if (newEveningMode !== isEveningMode) { isEveningMode = newEveningMode; clockElement.style.color = isEveningMode ? settings.nightColor : settings.dayColor; } }
-        function updateClock() { const now = new Date(); let hours = now.getHours(); const minutes = String(now.getMinutes()).padStart(2, '0'); const seconds = String(now.getSeconds()).padStart(2, '0'); if (settings.timeFormat === 12) { const ampm = hours >= 12 ? 'PM' : 'AM'; hours = hours % 12 || 12; hours = String(hours).padStart(2, '0'); } else { hours = String(hours).padStart(2, '0'); } let display = `${hours}:${minutes}`; if (settings.showSeconds) display += `:${seconds}`; clockElement.textContent = display; updateClockColor(); }
+        function updateClock() { const now = new Date(); let hours = now.getHours(); const minutes = String(now.getMinutes()).padStart(2, '0'); const seconds = String(now.getSeconds()).padStart(2, '0'); if (settings.timeFormat === 12) { const ampm = hours >= 12 ? 'PM' : 'AM'; hours = hours % 12 || 12; hours = String(hours).padStart(2, '0'); } else { hours = String(hours).padStart(2, '0'); } let display = `${hours}:${minutes}`; if (settings.showSeconds) display += `:${seconds}`; clockElement.textContent = display; updateClockColor(); updateMoonPhase(); }
         function requestLocation() { if (!settings.useLocation) { statusElement.textContent = ''; return; } if (settings.locationLat && settings.locationLon) { latitude = settings.locationLat; longitude = settings.locationLon; statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); return; } if (navigator.geolocation) { navigator.geolocation.getCurrentPosition((position) => { latitude = position.coords.latitude; longitude = position.coords.longitude; settings.locationLat = latitude; settings.locationLon = longitude; saveSettings(); statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); }, () => { statusElement.textContent = ''; }); } }
         clockElement.addEventListener('touchend', (e) => { const now = Date.now(); if (now - lastTapTime < 300) { e.preventDefault(); openSettings(); } lastTapTime = now; });
         function openSettings() { settingsModal.classList.add('active'); updateSettingsUI(); }
