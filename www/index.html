@@ -13,24 +13,97 @@
         #bgCanvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
         #clock { text-align: center; line-height: 1; letter-spacing: 0.001em; transition: color 0.5s ease, font-family 0.3s ease, font-size 0.3s ease, font-weight 0.3s ease; user-select: none; -webkit-user-select: none; cursor: default; font-variant-numeric: tabular-nums; font-weight: 800; transform: scaleY(1.15); position: relative; z-index: 10; }
         #status { position: absolute; top: 20px; left: 20px; font-size: 2vw; opacity: 0.3; color: #888; }
-        #settingsModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); z-index: 1000; overflow-y: auto; padding: 20px; }
-        #settingsModal.active { display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        .settings-container { background-color: #1a1a1a; border-radius: 20px; padding: 30px; max-width: 90vw; width: 100%; max-height: 80vh; overflow-y: auto; border: 2px solid #333; }
-        .settings-title { font-size: 6vw; font-weight: bold; margin-bottom: 30px; text-align: center; color: #fff; }
-        .setting-item { margin-bottom: 25px; display: flex; flex-direction: column; gap: 10px; }
-        .setting-label { font-size: 4vw; color: #aaa; font-weight: 500; }
-        .setting-sublabel { font-size: 3vw; color: #888; }
-        .setting-options { display: flex; gap: 10px; flex-wrap: wrap; }
-        .option-btn { flex: 1; padding: 15px; font-size: 3vw; border: 2px solid #444; background-color: #222; color: #888; border-radius: 10px; cursor: pointer; min-width: 45%; }
-        .option-btn.active { background-color: #0088ff; color: #fff; border-color: #0088ff; }
-        input[type="color"] { width: 100%; height: 60px; border: 2px solid #444; border-radius: 10px; }
-        input[type="text"], input[type="number"] { width: 100%; padding: 15px; font-size: 3vw; border: 2px solid #444; border-radius: 10px; background-color: #222; color: #fff; }
-        input[type="range"] { width: 100%; height: 10px; cursor: pointer; }
-        .toggle-btn { padding: 15px; font-size: 3vw; border: 2px solid #444; background-color: #222; color: #888; border-radius: 10px; cursor: pointer; width: 100%; }
-        .toggle-btn.on { background-color: #00aa44; color: #fff; border-color: #00aa44; }
-        .close-settings { margin-top: 30px; padding: 20px; font-size: 4vw; background-color: #0088ff; color: #fff; border: none; border-radius: 10px; cursor: pointer; width: 100%; font-weight: bold; }
+
+        :root {
+            --void: #0a0c12;
+            --surface: #161a24;
+            --surface-hi: #1f2431;
+            --ember: #ff8a4c;
+            --ember-dim: rgba(255,138,76,.16);
+            --ink: #ece9e2;
+            --ink-dim: #8d8b96;
+            --line: rgba(255,255,255,.08);
+            --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+        }
+
+        #settingsModal { display: none; position: fixed; inset: 0; background: rgba(5,6,10,0.88); z-index: 1000; }
+        #settingsModal.active { display: flex; align-items: center; justify-content: center; }
+
+        /* Settings panel is sized as an inscribed square within the round display
+           (68% of the shorter viewport axis) so no control ever crosses the bezel curve. */
+        .panel {
+            --panel-d: min(68vmin, 480px);
+            --scale: calc(var(--panel-d) / 300px);
+            width: var(--panel-d); height: var(--panel-d);
+            background: linear-gradient(160deg, rgba(255,255,255,.045), rgba(255,255,255,0) 45%), var(--surface);
+            border: 1px solid var(--line);
+            border-radius: calc(var(--panel-d) * 0.09);
+            display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,.5);
+            color: var(--ink);
+        }
+        .panel-head { display: flex; align-items: center; justify-content: space-between; padding: calc(14px*var(--scale)) calc(16px*var(--scale)) calc(6px*var(--scale)); }
+        .panel-title { font-size: calc(14px*var(--scale)); font-weight: 700; letter-spacing: -.01em; }
+        .icon-btn { width: calc(22px*var(--scale)); height: calc(22px*var(--scale)); border-radius: 50%; background: var(--surface-hi); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+        .icon-btn svg { width: 46%; height: 46%; }
+
+        .tabbar { display: flex; gap: calc(4px*var(--scale)); padding: 0 calc(12px*var(--scale)) calc(8px*var(--scale)); border-bottom: 1px solid var(--line); }
+        .tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: calc(2px*var(--scale)); padding: calc(6px*var(--scale)) 0; background: none; border: none; border-radius: calc(10px*var(--scale)); color: var(--ink-dim); cursor: pointer; }
+        .tab svg { width: calc(15px*var(--scale)); height: calc(15px*var(--scale)); }
+        .tab span { font-size: calc(9.5px*var(--scale)); font-weight: 600; letter-spacing: .02em; }
+        .tab.active { color: var(--ember); background: var(--ember-dim); }
+
+        .panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: calc(12px*var(--scale)) calc(15px*var(--scale)); }
+        .panel-body::-webkit-scrollbar { width: 4px; }
+        .panel-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 4px; }
+
+        .tab-panel { display: flex; flex-direction: column; gap: calc(14px*var(--scale)); }
+        .tab-panel[hidden] { display: none; }
+        .row { display: flex; flex-direction: column; gap: calc(6px*var(--scale)); }
+        .row.row-inline { flex-direction: row; align-items: center; justify-content: space-between; }
+        .row.dimmed { opacity: .45; }
+        .row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+
+        .field-label { display: flex; flex-direction: column; gap: 2px; font-size: calc(12.5px*var(--scale)); font-weight: 600; color: var(--ink); }
+        .field-sub { font-size: calc(9.5px*var(--scale)); color: var(--ink-dim); font-weight: 400; }
+        .field-value { font-size: calc(12px*var(--scale)); color: var(--ember); flex: 0 0 auto; }
+        .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+        .chip-group { display: flex; flex-wrap: wrap; gap: calc(6px*var(--scale)); }
+        .chip { padding: calc(6px*var(--scale)) calc(10px*var(--scale)); border-radius: 999px; background: var(--surface-hi); border: 1px solid transparent; color: var(--ink-dim); font-size: calc(10.5px*var(--scale)); cursor: pointer; }
+        .chip.active { background: var(--ember-dim); color: var(--ember); border-color: rgba(255,138,76,.5); }
+
+        .switch { width: calc(34px*var(--scale)); height: calc(20px*var(--scale)); border-radius: 999px; background: var(--surface-hi); border: 1px solid var(--line); position: relative; cursor: pointer; padding: 0; flex: 0 0 auto; }
+        .switch .knob { position: absolute; top: calc(2px*var(--scale)); left: calc(2px*var(--scale)); width: calc(14px*var(--scale)); height: calc(14px*var(--scale)); border-radius: 50%; background: var(--ink-dim); transition: transform .18s ease, background .18s ease; }
+        .switch.on { background: var(--ember-dim); border-color: rgba(255,138,76,.5); }
+        .switch.on .knob { transform: translateX(calc(14px*var(--scale))); background: var(--ember); }
+
+        input[type="range"].slider { -webkit-appearance: none; appearance: none; width: 100%; height: calc(4px*var(--scale)); border-radius: 999px; background: linear-gradient(to right, var(--ember) 0%, var(--ember) var(--pct,50%), var(--surface-hi) var(--pct,50%), var(--surface-hi) 100%); cursor: pointer; }
+        input[type="range"].slider::-webkit-slider-thumb { -webkit-appearance: none; width: calc(14px*var(--scale)); height: calc(14px*var(--scale)); border-radius: 50%; background: var(--ember); box-shadow: 0 0 0 4px rgba(255,138,76,.18); cursor: pointer; }
+        input[type="range"].slider::-moz-range-thumb { width: calc(14px*var(--scale)); height: calc(14px*var(--scale)); border: none; border-radius: 50%; background: var(--ember); box-shadow: 0 0 0 4px rgba(255,138,76,.18); cursor: pointer; }
+        input[type="range"].slider::-moz-range-track { height: calc(4px*var(--scale)); border-radius: 999px; background: var(--surface-hi); }
+
+        .text-input { width: 100%; padding: calc(8px*var(--scale)) calc(10px*var(--scale)); font-size: calc(11.5px*var(--scale)); border: 1px solid var(--line); border-radius: calc(8px*var(--scale)); background: var(--surface-hi); color: var(--ink); }
+        .text-input::placeholder { color: var(--ink-dim); }
+
+        .swatch-btn { position: relative; display: block; width: calc(26px*var(--scale)); height: calc(26px*var(--scale)); border-radius: 50%; border: 2px solid var(--line); background: var(--swatch); flex: 0 0 auto; cursor: pointer; overflow: hidden; }
+        .swatch-btn.small { width: calc(18px*var(--scale)); height: calc(18px*var(--scale)); border-width: 1.5px; }
+        .swatch-btn input[type="color"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+
+        .status-btn { width: 100%; padding: calc(9px*var(--scale)) calc(10px*var(--scale)); font-size: calc(11px*var(--scale)); border-radius: calc(8px*var(--scale)); border: 1px dashed var(--line); background: var(--surface-hi); color: var(--ink-dim); cursor: pointer; text-align: center; }
+        .status-btn.on { color: var(--ember); border-color: rgba(255,138,76,.5); border-style: solid; background: var(--ember-dim); }
+
+        .palette-list { display: flex; flex-direction: column; gap: calc(8px*var(--scale)); }
+        .palette-row { display: flex; flex-direction: column; gap: calc(4px*var(--scale)); }
+        .palette-name { font-size: calc(9.5px*var(--scale)); color: var(--ink-dim); }
+        .palette-swatches { display: flex; gap: calc(5px*var(--scale)); }
+
+        .panel-foot { display: flex; gap: calc(8px*var(--scale)); padding: calc(10px*var(--scale)) calc(15px*var(--scale)) calc(14px*var(--scale)); border-top: 1px solid var(--line); }
+        .btn-primary, .btn-ghost { border-radius: 999px; padding: calc(8px*var(--scale)) calc(16px*var(--scale)); font-size: calc(11.5px*var(--scale)); font-weight: 700; cursor: pointer; border: none; }
+        .btn-primary { flex: 1; background: var(--ember); color: #231206; }
+        .btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--ink-dim); font-weight: 600; }
+
         html, body { width: 100%; height: 100%; position: fixed; top: 0; left: 0; }
-        .value-display { text-align: center; color: #aaa; font-size: 3vw; }
     </style>
 </head>
 <body>
@@ -38,115 +111,138 @@
     <div id="status"></div>
     <div id="clock">--:--</div>
     <div id="settingsModal">
-        <div class="settings-container">
-            <div class="settings-title">Settings</div>
-
-            <!-- Clock Settings -->
-            <div class="setting-item">
-                <div class="setting-label">Font Size</div>
-                <div class="setting-options">
-                    <button class="option-btn" data-size="20">Small</button>
-                    <button class="option-btn" data-size="26">Medium</button>
-                    <button class="option-btn" data-size="32">Large</button>
-                    <button class="option-btn active" data-size="39">XLarge</button>
-                </div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Font Weight</div>
-                <input type="range" id="fontWeightSlider" min="100" max="900" step="100" value="800">
-                <div id="fontWeightValue" class="value-display">800</div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Font</div>
-                <div class="setting-options">
-                    <button class="option-btn active" data-font="'Segoe UI', 'Trebuchet MS', sans-serif">Modern</button>
-                    <button class="option-btn" data-font="'Courier New', monospace">Mono</button>
-                    <button class="option-btn" data-font="Georgia, serif">Serif</button>
-                    <button class="option-btn" data-font="'Arial Black', sans-serif">Bold</button>
-                </div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Time Format</div>
-                <div class="setting-options">
-                    <button class="option-btn active" data-format="24">24 Hour</button>
-                    <button class="option-btn" data-format="12">12 Hour</button>
-                </div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Show Seconds</div>
-                <button class="toggle-btn on" id="secondsToggle">ON</button>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Day Color</div>
-                <input type="color" id="dayColor" value="#ffffff">
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Night Color</div>
-                <input type="color" id="nightColor" value="#ff4444">
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Use Sunset/Sunrise</div>
-                <button class="toggle-btn on" id="locationToggle">ON</button>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Location (lat,lon)</div>
-                <input type="text" id="locationInput" placeholder="e.g., 52.1630,7.5886">
-            </div>
-            <!-- Brightness Control -->
-            <div class="setting-item">
-                <div class="setting-label">Auto Brightness (Light Sensor)</div>
-                <button class="toggle-btn on" id="autoBrightnessToggle">ON</button>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Screen Brightness</div>
-                <input type="range" id="brightnessSlider" min="30" max="255" step="5" value="128">
-                <div id="brightnessValue" class="value-display">128</div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Minimum Brightness (When Lit)</div>
-                <div class="setting-sublabel">Auto brightness won't dim below this while there's ambient light</div>
-                <input type="range" id="minBrightnessWhenLitSlider" min="30" max="255" step="5" value="100">
-                <div id="minBrightnessWhenLitValue" class="value-display">100</div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Dark Threshold (lux)</div>
-                <div class="setting-sublabel">Below this light level, the screen is allowed to fade to minimum brightness</div>
-                <input type="range" id="darkLuxThresholdSlider" min="0" max="50" step="1" value="5">
-                <div id="darkLuxThresholdValue" class="value-display">5</div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Brightness Auto-Recovery</div>
-                <div class="setting-sublabel">Lets the app recover if the system brightness slider gets stuck overriding it</div>
-                <button class="toggle-btn" id="writeSettingsBtn">Checking...</button>
-            </div>
-            <!-- Background Animation Settings -->
-            <div class="setting-item">
-                <div class="setting-label">Animation Speed</div>
-                <input type="range" id="bgSpeedSlider" min="0.5" max="3" step="0.5" value="0.5">
-                <div id="bgSpeedValue" class="value-display">0.5x</div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Background Intensity</div>
-                <input type="range" id="intensitySlider" min="0" max="100" step="10" value="70">
-                <div id="intensityValue" class="value-display">70%</div>
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Preset Interval (seconds)</div>
-                <div class="setting-sublabel">How long each color preset stays active before changing</div>
-                <input type="number" id="presetIntervalInput" min="5" step="1" value="60">
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Preset Transition Duration (seconds)</div>
-                <div class="setting-sublabel">How long the colors take to change, one by one, into the next preset</div>
-                <input type="number" id="transitionDurationInput" min="1" step="1" value="20">
-            </div>
-            <div class="setting-item">
-                <div class="setting-label">Color Presets</div>
-                <div id="paletteEditor"></div>
+        <div class="panel">
+            <div class="panel-head">
+                <span class="panel-title">Settings</span>
+                <button class="icon-btn" id="closeSettingsX" aria-label="Close settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6L18 18M18 6L6 18"/></svg>
+                </button>
             </div>
 
-            <button class="close-settings" id="closeSettings">Close Settings</button>
-            <button class="close-settings" style="background-color: #00aa44;" id="pinAppBtn">Pin App to Screen</button>
+            <nav class="tabbar" role="tablist">
+                <button class="tab active" data-tab="clock" role="tab" aria-selected="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Clock</span>
+                </button>
+                <button class="tab" data-tab="light" role="tab" aria-selected="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 3v2.2M12 18.8V21M4.2 12H2M22 12h-2.2M5.6 5.6l1.5 1.5M16.9 16.9l1.5 1.5M18.4 5.6l-1.5 1.5M7.1 16.9l-1.5 1.5"/></svg>
+                    <span>Light</span>
+                </button>
+                <button class="tab" data-tab="ambient" role="tab" aria-selected="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8c2-3 4-3 6 0s4 3 6 0 4-3 6 0M2 14c2-3 4-3 6 0s4 3 6 0 4-3 6 0"/></svg>
+                    <span>Ambient</span>
+                </button>
+            </nav>
+
+            <div class="panel-body" id="panelBody">
+
+                <!-- Clock Settings -->
+                <section class="tab-panel" data-panel="clock">
+                    <div class="row">
+                        <div class="field-label">Font Size</div>
+                        <div class="chip-group">
+                            <button class="chip" data-size="20">Small</button>
+                            <button class="chip" data-size="26">Medium</button>
+                            <button class="chip" data-size="32">Large</button>
+                            <button class="chip active" data-size="39">XLarge</button>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="row-top"><span class="field-label">Font Weight</span><span id="fontWeightValue" class="field-value mono">800</span></div>
+                        <input type="range" class="slider" id="fontWeightSlider" min="100" max="900" step="100" value="800">
+                    </div>
+                    <div class="row">
+                        <div class="field-label">Font</div>
+                        <div class="chip-group">
+                            <button class="chip active" data-font="'Segoe UI', 'Trebuchet MS', sans-serif">Modern</button>
+                            <button class="chip" data-font="'Courier New', monospace">Mono</button>
+                            <button class="chip" data-font="Georgia, serif">Serif</button>
+                            <button class="chip" data-font="'Arial Black', sans-serif">Bold</button>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="field-label">Time Format</div>
+                        <div class="chip-group">
+                            <button class="chip active" data-format="24">24 Hour</button>
+                            <button class="chip" data-format="12">12 Hour</button>
+                        </div>
+                    </div>
+                    <div class="row row-inline">
+                        <div class="field-label">Show Seconds</div>
+                        <button class="switch on" id="secondsToggle" role="switch" aria-checked="true"><span class="knob"></span></button>
+                    </div>
+                    <div class="row row-inline">
+                        <div class="field-label">Day Color</div>
+                        <label class="swatch-btn" style="--swatch:#ffffff"><input type="color" id="dayColor" value="#ffffff"></label>
+                    </div>
+                    <div class="row row-inline">
+                        <div class="field-label">Night Color</div>
+                        <label class="swatch-btn" style="--swatch:#ff4444"><input type="color" id="nightColor" value="#ff4444"></label>
+                    </div>
+                    <div class="row row-inline">
+                        <div class="field-label">Use Sunset/Sunrise</div>
+                        <button class="switch on" id="locationToggle" role="switch" aria-checked="true"><span class="knob"></span></button>
+                    </div>
+                    <div class="row" id="locationRow">
+                        <div class="field-label">Location (lat,lon)</div>
+                        <input type="text" class="text-input" id="locationInput" placeholder="e.g., 52.1630,7.5886">
+                    </div>
+                </section>
+
+                <!-- Brightness Control -->
+                <section class="tab-panel" data-panel="light" hidden>
+                    <div class="row row-inline">
+                        <div class="field-label">Auto Brightness<span class="field-sub">Uses the light sensor</span></div>
+                        <button class="switch on" id="autoBrightnessToggle" role="switch" aria-checked="true"><span class="knob"></span></button>
+                    </div>
+                    <div class="row dimmed" id="manualBrightRow">
+                        <div class="row-top"><span class="field-label">Screen Brightness<span class="field-sub">Used when auto is off</span></span><span id="brightnessValue" class="field-value mono">128</span></div>
+                        <input type="range" class="slider" id="brightnessSlider" min="30" max="255" step="5" value="128">
+                    </div>
+                    <div class="row">
+                        <div class="row-top"><span class="field-label">Minimum Brightness<span class="field-sub">Floor while there's ambient light</span></span><span id="minBrightnessWhenLitValue" class="field-value mono">100</span></div>
+                        <input type="range" class="slider" id="minBrightnessWhenLitSlider" min="30" max="255" step="5" value="100">
+                    </div>
+                    <div class="row">
+                        <div class="row-top"><span class="field-label">Dark Threshold<span class="field-sub">Lux below which the screen may fully dim</span></span><span id="darkLuxThresholdValue" class="field-value mono">5</span></div>
+                        <input type="range" class="slider" id="darkLuxThresholdSlider" min="0" max="50" step="1" value="5">
+                    </div>
+                    <div class="row">
+                        <div class="field-label">Brightness Auto-Recovery<span class="field-sub">Regains control if the system slider overrides it</span></div>
+                        <button class="status-btn" id="writeSettingsBtn">Checking...</button>
+                    </div>
+                </section>
+
+                <!-- Background Animation Settings -->
+                <section class="tab-panel" data-panel="ambient" hidden>
+                    <div class="row">
+                        <div class="row-top"><span class="field-label">Animation Speed</span><span id="bgSpeedValue" class="field-value mono">0.5x</span></div>
+                        <input type="range" class="slider" id="bgSpeedSlider" min="0.5" max="3" step="0.5" value="0.5">
+                    </div>
+                    <div class="row">
+                        <div class="row-top"><span class="field-label">Background Intensity</span><span id="intensityValue" class="field-value mono">70%</span></div>
+                        <input type="range" class="slider" id="intensitySlider" min="0" max="100" step="10" value="70">
+                    </div>
+                    <div class="row">
+                        <div class="field-label">Preset Interval<span class="field-sub">Seconds each palette stays active</span></div>
+                        <input type="number" class="text-input" id="presetIntervalInput" min="5" step="1" value="60">
+                    </div>
+                    <div class="row">
+                        <div class="field-label">Transition Duration<span class="field-sub">Seconds to fade into the next palette</span></div>
+                        <input type="number" class="text-input" id="transitionDurationInput" min="1" step="1" value="20">
+                    </div>
+                    <div class="row">
+                        <div class="field-label">Color Presets</div>
+                        <div class="palette-list" id="paletteEditor"></div>
+                    </div>
+                </section>
+
+            </div>
+
+            <div class="panel-foot">
+                <button class="btn-primary" id="closeSettings">Done</button>
+                <button class="btn-ghost" id="pinAppBtn">Pin to Screen</button>
+            </div>
         </div>
     </div>
     <script>
@@ -377,7 +473,29 @@
         function openSettings() { settingsModal.classList.add('active'); updateSettingsUI(); }
         function closeSettings() { settingsModal.classList.remove('active'); saveSettings(); applySettings(); requestLocation(); requestFullscreen(); }
         document.getElementById('closeSettings').addEventListener('click', closeSettings);
+        document.getElementById('closeSettingsX').addEventListener('click', closeSettings);
         settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettings(); });
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+                tab.classList.add('active'); tab.setAttribute('aria-selected', 'true');
+                const name = tab.dataset.tab;
+                document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.dataset.panel !== name; });
+                document.getElementById('panelBody').scrollTop = 0;
+            });
+        });
+
+        // Keeps a range input's filled-in gradient in sync with its value.
+        function syncSlider(input) {
+            const min = parseFloat(input.min), max = parseFloat(input.max), val = parseFloat(input.value);
+            input.style.setProperty('--pct', ((val - min) / (max - min) * 100) + '%');
+        }
+        function setSwatch(input) {
+            const label = input.closest('.swatch-btn');
+            if (label) label.style.setProperty('--swatch', input.value);
+        }
+
         function updateSettingsUI() {
             document.querySelectorAll('[data-size]').forEach(btn => { btn.classList.remove('active'); if (parseInt(btn.dataset.size) === settings.fontSize) btn.classList.add('active'); btn.onclick = () => { settings.fontSize = parseInt(btn.dataset.size); updateSettingsUI(); applySettings(); }; });
 
@@ -385,19 +503,22 @@
             const fontWeightValue = document.getElementById('fontWeightValue');
             fontWeightSlider.value = settings.fontWeight;
             fontWeightValue.textContent = settings.fontWeight;
-            fontWeightSlider.oninput = (e) => { settings.fontWeight = parseInt(e.target.value); fontWeightValue.textContent = settings.fontWeight; applySettings(); };
+            syncSlider(fontWeightSlider);
+            fontWeightSlider.oninput = (e) => { settings.fontWeight = parseInt(e.target.value); fontWeightValue.textContent = settings.fontWeight; syncSlider(fontWeightSlider); applySettings(); };
 
             const bgSpeedSlider = document.getElementById('bgSpeedSlider');
             const bgSpeedValue = document.getElementById('bgSpeedValue');
             bgSpeedSlider.value = settings.bgSpeed;
             bgSpeedValue.textContent = settings.bgSpeed + 'x';
-            bgSpeedSlider.oninput = (e) => { settings.bgSpeed = parseFloat(e.target.value); bgSpeedValue.textContent = settings.bgSpeed + 'x'; };
+            syncSlider(bgSpeedSlider);
+            bgSpeedSlider.oninput = (e) => { settings.bgSpeed = parseFloat(e.target.value); bgSpeedValue.textContent = settings.bgSpeed + 'x'; syncSlider(bgSpeedSlider); };
 
             const intensitySlider = document.getElementById('intensitySlider');
             const intensityValue = document.getElementById('intensityValue');
             intensitySlider.value = settings.bgIntensity;
             intensityValue.textContent = settings.bgIntensity + '%';
-            intensitySlider.oninput = (e) => { settings.bgIntensity = parseInt(e.target.value); intensityValue.textContent = settings.bgIntensity + '%'; };
+            syncSlider(intensitySlider);
+            intensitySlider.oninput = (e) => { settings.bgIntensity = parseInt(e.target.value); intensityValue.textContent = settings.bgIntensity + '%'; syncSlider(intensitySlider); };
 
             const presetIntervalInput = document.getElementById('presetIntervalInput');
             presetIntervalInput.value = settings.presetIntervalSeconds;
@@ -409,38 +530,52 @@
 
             const paletteEditor = document.getElementById('paletteEditor');
             paletteEditor.innerHTML = settings.palettes.map((palette, p) => `
-                <div class="setting-sublabel">${PALETTE_NAMES[p]}</div>
-                <div class="setting-options">
-                    ${palette.map((color, c) => `<input type="color" data-preset="${p}" data-color="${c}" value="${color}" style="width:50px;height:50px;flex:0 0 auto;">`).join('')}
+                <div class="palette-row">
+                    <div class="palette-name">${PALETTE_NAMES[p]}</div>
+                    <div class="palette-swatches">
+                        ${palette.map((color, c) => `<label class="swatch-btn small" style="--swatch:${color}"><input type="color" data-preset="${p}" data-color="${c}" value="${color}"></label>`).join('')}
+                    </div>
                 </div>
             `).join('');
             paletteEditor.querySelectorAll('input[type="color"]').forEach(input => {
                 input.onchange = (e) => {
                     settings.palettes[parseInt(input.dataset.preset)][parseInt(input.dataset.color)] = e.target.value;
+                    setSwatch(input);
                 };
             });
 
             document.querySelectorAll('[data-font]').forEach(btn => { btn.classList.remove('active'); if (btn.dataset.font === settings.font) btn.classList.add('active'); btn.onclick = () => { settings.font = btn.dataset.font; updateSettingsUI(); }; });
             document.querySelectorAll('[data-format]').forEach(btn => { btn.classList.remove('active'); if (parseInt(btn.dataset.format) === settings.timeFormat) btn.classList.add('active'); btn.onclick = () => { settings.timeFormat = parseInt(btn.dataset.format); updateSettingsUI(); updateClock(); }; });
-            const secondsToggle = document.getElementById('secondsToggle'); secondsToggle.classList.toggle('on', settings.showSeconds); secondsToggle.textContent = settings.showSeconds ? 'ON' : 'OFF'; secondsToggle.onclick = () => { settings.showSeconds = !settings.showSeconds; updateSettingsUI(); updateClock(); };
-            document.getElementById('dayColor').value = settings.dayColor; document.getElementById('dayColor').onchange = (e) => { settings.dayColor = e.target.value; updateClock(); };
-            document.getElementById('nightColor').value = settings.nightColor; document.getElementById('nightColor').onchange = (e) => { settings.nightColor = e.target.value; updateClock(); };
-            const locationToggle = document.getElementById('locationToggle'); locationToggle.classList.toggle('on', settings.useLocation); locationToggle.textContent = settings.useLocation ? 'ON' : 'OFF'; locationToggle.onclick = () => { settings.useLocation = !settings.useLocation; updateSettingsUI(); updateClock(); };
+            const secondsToggle = document.getElementById('secondsToggle'); secondsToggle.classList.toggle('on', settings.showSeconds); secondsToggle.setAttribute('aria-checked', settings.showSeconds); secondsToggle.onclick = () => { settings.showSeconds = !settings.showSeconds; updateSettingsUI(); updateClock(); };
+
+            const dayColorInput = document.getElementById('dayColor'); dayColorInput.value = settings.dayColor; setSwatch(dayColorInput); dayColorInput.onchange = (e) => { settings.dayColor = e.target.value; setSwatch(dayColorInput); updateClock(); };
+            const nightColorInput = document.getElementById('nightColor'); nightColorInput.value = settings.nightColor; setSwatch(nightColorInput); nightColorInput.onchange = (e) => { settings.nightColor = e.target.value; setSwatch(nightColorInput); updateClock(); };
+
+            const locationRow = document.getElementById('locationRow');
+            const locationToggle = document.getElementById('locationToggle');
+            locationToggle.classList.toggle('on', settings.useLocation);
+            locationToggle.setAttribute('aria-checked', settings.useLocation);
+            locationRow.style.display = settings.useLocation ? '' : 'none';
+            locationToggle.onclick = () => { settings.useLocation = !settings.useLocation; updateSettingsUI(); updateClock(); };
             const locationInput = document.getElementById('locationInput'); if (settings.locationLat && settings.locationLon) locationInput.value = `${settings.locationLat},${settings.locationLon}`; locationInput.onchange = (e) => { const [lat, lon] = e.target.value.split(',').map(s => parseFloat(s.trim())); if (!isNaN(lat) && !isNaN(lon)) { settings.locationLat = lat; settings.locationLon = lon; latitude = lat; longitude = lon; updateSettingsUI(); updateClock(); } };
 
+            const manualBrightRow = document.getElementById('manualBrightRow');
             const autoBrightnessToggle = document.getElementById('autoBrightnessToggle');
             autoBrightnessToggle.classList.toggle('on', settings.autoBrightness);
-            autoBrightnessToggle.textContent = settings.autoBrightness ? 'ON' : 'OFF';
+            autoBrightnessToggle.setAttribute('aria-checked', settings.autoBrightness);
+            manualBrightRow.classList.toggle('dimmed', settings.autoBrightness);
             autoBrightnessToggle.onclick = () => { settings.autoBrightness = !settings.autoBrightness; updateSettingsUI(); applyAutoBrightness(); };
 
             const brightnessSlider = document.getElementById('brightnessSlider');
             const brightnessValue = document.getElementById('brightnessValue');
             brightnessSlider.value = settings.brightness;
             brightnessValue.textContent = settings.brightness;
+            syncSlider(brightnessSlider);
             brightnessSlider.oninput = (e) => {
                 const brightness = parseInt(e.target.value);
                 settings.brightness = brightness;
                 brightnessValue.textContent = brightness;
+                syncSlider(brightnessSlider);
                 if (!settings.autoBrightness) targetBrightness = brightness;
             };
 
@@ -448,13 +583,15 @@
             const minBrightnessWhenLitValue = document.getElementById('minBrightnessWhenLitValue');
             minBrightnessWhenLitSlider.value = settings.minBrightnessWhenLit;
             minBrightnessWhenLitValue.textContent = settings.minBrightnessWhenLit;
-            minBrightnessWhenLitSlider.oninput = (e) => { settings.minBrightnessWhenLit = parseInt(e.target.value); minBrightnessWhenLitValue.textContent = settings.minBrightnessWhenLit; };
+            syncSlider(minBrightnessWhenLitSlider);
+            minBrightnessWhenLitSlider.oninput = (e) => { settings.minBrightnessWhenLit = parseInt(e.target.value); minBrightnessWhenLitValue.textContent = settings.minBrightnessWhenLit; syncSlider(minBrightnessWhenLitSlider); };
 
             const darkLuxThresholdSlider = document.getElementById('darkLuxThresholdSlider');
             const darkLuxThresholdValue = document.getElementById('darkLuxThresholdValue');
             darkLuxThresholdSlider.value = settings.darkLuxThreshold;
             darkLuxThresholdValue.textContent = settings.darkLuxThreshold;
-            darkLuxThresholdSlider.oninput = (e) => { settings.darkLuxThreshold = parseInt(e.target.value); darkLuxThresholdValue.textContent = settings.darkLuxThreshold; };
+            syncSlider(darkLuxThresholdSlider);
+            darkLuxThresholdSlider.oninput = (e) => { settings.darkLuxThreshold = parseInt(e.target.value); darkLuxThresholdValue.textContent = settings.darkLuxThreshold; syncSlider(darkLuxThresholdSlider); };
 
             updateWriteSettingsUI();
         }
@@ -463,13 +600,14 @@
             const btn = document.getElementById('writeSettingsBtn');
             if (!cordova || !cordova.plugins || !cordova.plugins.Brightness || !cordova.plugins.Brightness.canWriteSettings) {
                 btn.textContent = 'Unavailable';
+                btn.classList.remove('on');
                 btn.onclick = null;
                 return;
             }
             cordova.plugins.Brightness.canWriteSettings((canWrite) => {
                 if (canWrite) {
                     btn.classList.add('on');
-                    btn.textContent = 'ENABLED';
+                    btn.textContent = 'Enabled';
                     btn.onclick = null;
                 } else {
                     btn.classList.remove('on');
