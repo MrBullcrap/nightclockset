@@ -215,6 +215,10 @@
 
                 <!-- Background Animation Settings -->
                 <section class="tab-panel" data-panel="ambient" hidden>
+                    <div class="row row-inline">
+                        <div class="field-label">Moon Phase Ring<span class="field-sub">Glowing ring showing tonight's moon phase</span></div>
+                        <button class="switch on" id="moonRingToggle" role="switch" aria-checked="true"><span class="knob"></span></button>
+                    </div>
                     <div class="row">
                         <div class="row-top"><span class="field-label">Animation Speed</span><span id="bgSpeedValue" class="field-value mono">0.5x</span></div>
                         <input type="range" class="slider" id="bgSpeedSlider" min="0.5" max="3" step="0.5" value="0.5">
@@ -273,6 +277,11 @@
             return "#" + ((1 << 24) + (Math.floor(r) << 16) + (Math.floor(g) << 8) + Math.floor(b)).toString(16).slice(1);
         }
 
+        function hexWithAlpha(hex, alpha) {
+            const { r, g, b } = hexToRgb(hex);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
         function interpolateColors(hex1, hex2, t) {
             const c1 = hexToRgb(hex1);
             const c2 = hexToRgb(hex2);
@@ -282,6 +291,46 @@
             return rgbToHex(r, g, b);
         }
 
+        function hexToHsl(hex) {
+            const { r, g, b } = hexToRgb(hex);
+            const rn = r / 255, gn = g / 255, bn = b / 255;
+            const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+            const l = (max + min) / 2;
+            let h = 0, s = 0;
+            const d = max - min;
+            if (d !== 0) {
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max) {
+                    case rn: h = (gn - bn) / d + (gn < bn ? 6 : 0); break;
+                    case gn: h = (bn - rn) / d + 2; break;
+                    default: h = (rn - gn) / d + 4;
+                }
+                h /= 6;
+            }
+            return { h, s, l };
+        }
+
+        function hslToHex(h, s, l) {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1 / 6) return p + (q - p) * 6 * t;
+                if (t < 1 / 2) return q;
+                if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+                return p;
+            };
+            let r, g, b;
+            if (s === 0) { r = g = b = l; }
+            else {
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1 / 3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1 / 3);
+            }
+            return rgbToHex(r * 255, g * 255, b * 255);
+        }
+
         // Five curated 5-color palettes. The background continuously shuffles
         // through them, staying on each for settings.presetIntervalSeconds,
         // then changing color-by-color (staggered, not all at once) into the
@@ -289,13 +338,95 @@
         // it also slowly drifts through the active palette's own colors so
         // all five actually get used over time. Editable in Settings.
         const PALETTE_NAMES = ['Aurora Night', 'Midnight Velvet', 'Tropical Nightfall', 'Dusk Sunset', 'Galactic Berry'];
+        // Each palette's original darkest swatch (always its first entry) has been
+        // swapped for one of five new colors, picked to match that palette's mood:
+        // pacific-cyan (Aurora), rosy-granite (Midnight), sage-green (Tropical),
+        // tangerine-dream (Dusk), pale-amber (Galactic) - no color reused.
+        // Lightened a bit across the board (extra correction for the darkest
+        // swatches) so the daytime gradient doesn't read as murky in a dim room.
         const DEFAULT_PALETTES = [
-            ['#1b1f3a', '#3a2a7a', '#6d42c7', '#22d3ee', '#a7f3d0'],
-            ['#05070f', '#1b1035', '#3b1d6b', '#7c3aed', '#f0abfc'],
-            ['#072146', '#0b5fff', '#00c2ff', '#00d084', '#f9c74f'],
-            ['#db062f', '#f08118', '#fae00c', '#cd128b', '#f8d77b'],
-            ['#0a0f2c', '#2b1055', '#5b21b6', '#db2777', '#fbcfe8']
+            ['#38adcb', '#523bac', '#8561d0', '#48dbf1', '#cbf8e3'],
+            ['#929198', '#4d2e98', '#602fae', '#955ff0', '#f7d2fd'],
+            ['#9eba8e', '#347aff', '#29ccff', '#00f99e', '#fad476'],
+            ['#e6a98f', '#f2963e', '#fbe534', '#eb1da2', '#fae3a2'],
+            ['#e3de8f', '#5921b0', '#6c28d8', '#e14a8d', '#fcd9ed']
         ];
+
+        // Warm-to-cool accent spectrum, not exposed in Settings. Two adjacent
+        // colors from this strip are always blended into whichever palette is
+        // currently showing; which two depends on the room's ambient light
+        // (bright room -> warm end, dark room -> cool end), read from the
+        // light sensor. Purely a rendering detail, so it never touches
+        // settings.palettes / the palette editor.
+        //
+        // The raw list runs from vivid red down to a fairly dark blue, so hue
+        // alone tracks lightness too - a dark room would end up picking
+        // visibly dark colors, doubling up with the already-dim surroundings.
+        // Normalizing every entry to the same HSL lightness keeps hue (the
+        // thing that's supposed to respond to brightness) independent of how
+        // dark or light the swatch itself looks.
+        const RAW_HIDDEN_ACCENT_SPECTRUM = [
+            '#f94144', '#f3722c', '#f8961e', '#f9844a', '#f9c74f',
+            '#90be6d', '#43aa8b', '#4d908e', '#577590', '#277da1'
+        ];
+        const HIDDEN_ACCENT_LIGHTNESS = 0.6;
+        const HIDDEN_ACCENT_SPECTRUM = RAW_HIDDEN_ACCENT_SPECTRUM.map(hex => {
+            const { h, s } = hexToHsl(hex);
+            return hslToHex(h, s, HIDDEN_ACCENT_LIGHTNESS);
+        });
+
+        // Backdrop behind the gradient blobs: a dim, near-static average of the
+        // SAME palette the blobs are drawing from, so it always fully covers
+        // the canvas with color instead of the blobs' gaps ever exposing plain
+        // black. It deliberately does NOT run its own independent color cycle -
+        // blobs fade to transparent at their rim, so a backdrop drifting on its
+        // own timeline would visibly tint through that rim and look like the
+        // blob itself changing color. This only moves as fast as the palette
+        // itself does (the existing staggered palette transition / accent
+        // crossfade), which is already slow and intentional.
+        const BACKDROP_LIGHTNESS = 0.14;
+
+        function getBackdropColor(palette) {
+            let r = 0, g = 0, b = 0;
+            palette.forEach(hex => { const c = hexToRgb(hex); r += c.r; g += c.g; b += c.b; });
+            const { h, s } = hexToHsl(rgbToHex(r / palette.length, g / palette.length, b / palette.length));
+            return hslToHex(h, s, BACKDROP_LIGHTNESS);
+        }
+
+        let currentLux = null;
+        let smoothedLux = null;       // heavily damped copy of currentLux, so a flickering
+                                       // sensor reading can't flip the target pair back and forth
+        let currentAccentColors = null; // the colors actually drawn, crossfaded toward the target
+
+        function targetAccentColors() {
+            const n = HIDDEN_ACCENT_SPECTRUM.length;
+            const lux = smoothedLux === null ? 50 : smoothedLux;
+            const brightFraction = Math.max(0, Math.min(1, lux / 10000));
+            const pos = Math.round((1 - brightFraction) * (n - 1));
+            const i0 = Math.max(0, Math.min(n - 2, pos));
+            return [HIDDEN_ACCENT_SPECTRUM[i0], HIDDEN_ACCENT_SPECTRUM[i0 + 1]];
+        }
+
+        // Advances the lux smoothing and crossfades the displayed accent colors
+        // toward the (also smoothed) target. The raw sensor is very jittery
+        // (single readings can swing from ~500 to ~12000 lux in a couple of
+        // seconds), so smoothedLux is damped hard (~2 min time constant) to
+        // track the room's real brightness trend rather than sensor noise;
+        // the color crossfade on top of that is what makes any actual change
+        // fade in gradually instead of snapping.
+        function updateHiddenAccentColors() {
+            // Clamp before smoothing: readings beyond this range don't change the
+            // target anyway (see brightFraction below), but left unclamped a single
+            // extreme spike could still drag the average disproportionately.
+            const lux = Math.max(0, Math.min(10000, currentLux === null ? 50 : currentLux));
+            smoothedLux = smoothedLux === null ? lux : lerp(smoothedLux, lux, 0.0015);
+            const target = targetAccentColors();
+            if (!currentAccentColors) { currentAccentColors = target.slice(); return; }
+            currentAccentColors = [
+                interpolateColors(currentAccentColors[0], target[0], 0.015),
+                interpolateColors(currentAccentColors[1], target[1], 0.015)
+            ];
+        }
 
         function pickNextPalette(excludeIndex) {
             if (DEFAULT_PALETTES.length <= 1) return excludeIndex;
@@ -345,15 +476,100 @@
             return getStaggeredBlend(settings.palettes[paletteCurrent], settings.palettes[paletteNext], t);
         }
 
-        function samplePaletteColors(palette, phase) {
-            const pick = (offset) => {
-                const p = (phase + offset) % 1;
-                const scaled = p * palette.length;
-                const i = Math.floor(scaled) % palette.length;
-                const j = (i + 1) % palette.length;
-                return interpolateColors(palette[i], palette[j], scaled - Math.floor(scaled));
-            };
-            return [pick(0), pick(1 / 3), pick(2 / 3)];
+        // Deterministic pseudo-random fraction in [0,1) for a given index/salt,
+        // so each color gets stable-but-distinct motion parameters without
+        // needing any persisted state.
+        function indexNoise(k, salt) {
+            const s = Math.sin(k * salt) * 43758.5453;
+            return s - Math.floor(s);
+        }
+
+        // Moon phase ring: a soft corona whose arc length is tonight's illuminated
+        // fraction (SunCalc.getMoonIllumination). Rendered once to an offscreen
+        // canvas per phase/size change, not redrawn every frame; the render loop
+        // just alpha-blends that cached image with a slow breathing pulse.
+        let moonFraction = 0;
+        let moonRingCanvas = null, moonRingCtx = null, moonRingDirty = true;
+        const MOON_RING_LAYERS = [
+            { width: 1.5, alpha: 0.6 },
+            { width: 6, alpha: 0.22 },
+            { width: 14, alpha: 0.09 },
+            { width: 26, alpha: 0.04 }
+        ];
+        const MOON_RING_SEGMENTS = 72;
+        const MOON_RING_FADE_FRACTION = 0.18;
+
+        function updateMoonFraction() {
+            if (typeof SunCalc === 'undefined') return;
+            const next = SunCalc.getMoonIllumination(new Date()).fraction;
+            if (Math.abs(next - moonFraction) > 0.0005) moonRingDirty = true;
+            moonFraction = next;
+        }
+
+        function renderMoonRingCanvas(width, height) {
+            moonRingCanvas = moonRingCanvas || document.createElement('canvas');
+            moonRingCanvas.width = width;
+            moonRingCanvas.height = height;
+            moonRingCtx = moonRingCanvas.getContext('2d');
+            const rctx = moonRingCtx;
+
+            const sweep = moonFraction * Math.PI * 2;
+            if (sweep <= 0.001) return;
+
+            const cx = width / 2, cy = height / 2;
+            const radius = Math.min(width, height) / 2 * 0.94;
+            const startAngle = -Math.PI / 2;
+            const applyEdgeFade = moonFraction < 0.98;
+
+            rctx.globalCompositeOperation = 'lighter';
+            rctx.lineCap = 'round';
+
+            MOON_RING_LAYERS.forEach(layer => {
+                for (let i = 0; i < MOON_RING_SEGMENTS; i++) {
+                    const t0 = i / MOON_RING_SEGMENTS, t1 = (i + 1) / MOON_RING_SEGMENTS, tMid = (t0 + t1) / 2;
+                    const edgeFade = applyEdgeFade ? Math.max(0, Math.min(tMid / MOON_RING_FADE_FRACTION, (1 - tMid) / MOON_RING_FADE_FRACTION, 1)) : 1;
+                    const alpha = layer.alpha * edgeFade;
+                    if (alpha <= 0.003) continue;
+                    rctx.beginPath();
+                    rctx.strokeStyle = `rgba(210, 222, 255, ${alpha})`;
+                    rctx.lineWidth = layer.width * (width / 480);
+                    rctx.arc(cx, cy, radius, startAngle + sweep * t0, startAngle + sweep * t1);
+                    rctx.stroke();
+                }
+            });
+        }
+
+        function drawMoonRing(width, height) {
+            if (moonRingDirty || !moonRingCanvas || moonRingCanvas.width !== width || moonRingCanvas.height !== height) {
+                renderMoonRingCanvas(width, height);
+                moonRingDirty = false;
+            }
+            const pulse = 0.55 + 0.45 * Math.sin(colorTime * 0.0005);
+            bgCtx.save();
+            bgCtx.globalAlpha = pulse;
+            bgCtx.drawImage(moonRingCanvas, 0, 0);
+            bgCtx.restore();
+        }
+
+        let blobGradientCache = [];
+        let blobLayerCanvas = null, blobLayerCtx = null;
+        // Blobs are soft, blurry glows - rendering them at full resolution and
+        // then scaling up loses essentially no visible detail, but cuts the
+        // number of pixels the gradient fills actually shade by 4x, which is
+        // where the real animation cost was (confirmed by disabling all blob
+        // drawing: frame time dropped from ~30ms/jittery to a flat 16.7ms).
+        const BLOB_RENDER_SCALE = 0.5;
+
+        function ensureBlobLayer(width, height) {
+            const bw = Math.max(1, Math.round(width * BLOB_RENDER_SCALE));
+            const bh = Math.max(1, Math.round(height * BLOB_RENDER_SCALE));
+            if (!blobLayerCanvas || blobLayerCanvas.width !== bw || blobLayerCanvas.height !== bh) {
+                blobLayerCanvas = document.createElement('canvas');
+                blobLayerCanvas.width = bw;
+                blobLayerCanvas.height = bh;
+                blobLayerCtx = blobLayerCanvas.getContext('2d');
+                blobGradientCache = []; // radii were cached at the old resolution
+            }
         }
 
         function drawAnimatedBackground(time) {
@@ -365,68 +581,154 @@
             if (isNight) {
                 bgCtx.fillStyle = '#000000';
                 bgCtx.fillRect(0, 0, width, height);
+                if (settings.showMoonRing) drawMoonRing(width, height);
                 return;
             }
 
-            const effectivePalette = updatePaletteState();
-            const colorPhase = (colorTime * 0.00003) % 1;
-            const [c1, c2, c3] = samplePaletteColors(effectivePalette, colorPhase);
+            const effectivePalette = updatePaletteState().concat(currentAccentColors || targetAccentColors());
             const intensity = settings.bgIntensity / 100;
+            const n = effectivePalette.length;
 
-            bgCtx.fillStyle = '#000';
+            bgCtx.fillStyle = getBackdropColor(effectivePalette);
             bgCtx.fillRect(0, 0, width, height);
 
-            const angle1 = (time * settings.bgSpeed * 0.08) % 360;
-            const angle2 = (time * settings.bgSpeed * 0.06 + 120) % 360;
-            const angle3 = (time * settings.bgSpeed * 0.04 + 240) % 360;
+            ensureBlobLayer(width, height);
+            blobLayerCtx.setTransform(BLOB_RENDER_SCALE, 0, 0, BLOB_RENDER_SCALE, 0, 0);
+            blobLayerCtx.clearRect(0, 0, width, height);
 
-            const rad1 = (angle1 * Math.PI) / 180;
-            const rad2 = (angle2 * Math.PI) / 180;
-            const rad3 = (angle3 * Math.PI) / 180;
+            // Every color is its own soft glowing blob orbiting the screen on its
+            // own closed path - own speed, own direction, own orbit size, all
+            // deterministic per index. Nothing here shares a single rotation
+            // angle, so there's no common axis for the eye to lock onto as one
+            // sweeping beam; each blob just drifts on its own.
+            const cx = width / 2, cy = height / 2;
+            const maxDim = Math.max(width, height);
+            const t = time * 0.00019;
 
-            const endX1 = width * Math.cos(rad1);
-            const endY1 = height * Math.sin(rad1);
-            const grad1 = bgCtx.createLinearGradient(0, 0, endX1, endY1);
-            grad1.addColorStop(0, c1);
-            grad1.addColorStop(0.5, c2);
-            grad1.addColorStop(1, c3);
-            bgCtx.globalAlpha = 0.7 * intensity;
-            bgCtx.fillStyle = grad1;
-            bgCtx.fillRect(0, 0, width, height);
+            // Normal alpha blending, not additive: overlapping blobs mix
+            // toward each other's color, they never sum brightness, so there's
+            // no way for a cluster of overlaps to clip to white regardless of
+            // how many blobs or how high the intensity slider goes.
+            // Each palette color gets a couple of independently-moving
+            // instances rather than just one, so there's more simultaneous
+            // color on screen without inventing colors outside the palette.
+            const BLOB_INSTANCES_PER_COLOR = 3;
+            const blobCount = n * BLOB_INSTANCES_PER_COLOR;
+            const blobs = [];
+            for (let k = 0; k < blobCount; k++) {
+                const rFreqX = indexNoise(k, 12.9898);
+                const rFreqY = indexNoise(k, 78.233);
+                const rDirX = indexNoise(k, 39.346);
+                const rDirY = indexNoise(k, 94.673);
+                const rOrbitX = indexNoise(k, 15.732);
+                const rOrbitY = indexNoise(k, 63.981);
+                const rRadius = indexNoise(k, 27.614);
+                const rStretchFreqA = indexNoise(k, 51.291);
+                const rStretchFreqB = indexNoise(k, 83.147);
+                const rStretchPhaseA = indexNoise(k, 19.573);
+                const rStretchPhaseB = indexNoise(k, 71.842);
+                const rSpin = indexNoise(k, 44.128);
+                const rSpinDir = indexNoise(k, 58.912);
+                const rPresenceFreq = indexNoise(k, 67.219);
+                const rPresencePhase = indexNoise(k, 29.884);
 
-            const endX2 = width * Math.cos(rad2);
-            const endY2 = height * Math.sin(rad2);
-            const grad2 = bgCtx.createLinearGradient(0, 0, endX2, endY2);
-            grad2.addColorStop(0, c2);
-            grad2.addColorStop(0.5, c3);
-            grad2.addColorStop(1, c1);
-            bgCtx.globalAlpha = 0.4 * intensity;
-            bgCtx.fillStyle = grad2;
-            bgCtx.fillRect(0, 0, width, height);
+                const freqX = (0.4 + rFreqX * 1.3) * (rDirX > 0.5 ? 1 : -1);
+                const freqY = (0.4 + rFreqY * 1.3) * (rDirY > 0.5 ? 1 : -1);
+                const phaseX = rFreqX * Math.PI * 2;
+                const phaseY = rFreqY * Math.PI * 2;
+                // Amplitude reaches well past the canvas edge (half-width is
+                // 0.5) so blobs actually travel off-screen and back, not just
+                // orbit within the visible area.
+                const orbitX = (0.35 + rOrbitX * 0.5) * width;
+                const orbitY = (0.35 + rOrbitY * 0.5) * height;
 
-            const radialGrad = bgCtx.createRadialGradient(
-                width / 2, height / 2, 0,
-                width / 2, height / 2, Math.max(width, height) * 0.8
-            );
-            radialGrad.addColorStop(0, c3);
-            radialGrad.addColorStop(1, c1);
-            bgCtx.globalAlpha = 0.3 * intensity;
-            bgCtx.fillStyle = radialGrad;
-            bgCtx.fillRect(0, 0, width, height);
+                const px = cx + Math.cos(t * freqX + phaseX) * orbitX;
+                const py = cy + Math.sin(t * freqY + phaseY) * orbitY;
+                // Kept modest and fairly uniform in size - with normal blending
+                // (not additive), coverage no longer depends on blobs stacking
+                // brightness, so smaller/more distinct patches read as more
+                // colors on screen at once rather than a single averaged glow.
+                const blobR = maxDim * (0.42 + rRadius * 0.16);
+
+                // Each blob fades in and out of prominence on its own
+                // independent cycle, so which blob currently "leads" keeps
+                // rotating instead of the same one always being dominant.
+                const presence = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * (0.1 + rPresenceFreq * 0.16) + rPresencePhase * Math.PI * 2));
+
+                // Two independent sine waves stretch the blob along perpendicular
+                // axes on their own cycles, plus a slow independent spin, so the
+                // shape itself is always breathing/elongating - never a static circle.
+                const stretchA = 1 + 0.35 * Math.sin(t * (0.5 + rStretchFreqA * 0.7) + rStretchPhaseA * Math.PI * 2);
+                const stretchB = 1 + 0.35 * Math.sin(t * (0.5 + rStretchFreqB * 0.7) + rStretchPhaseB * Math.PI * 2);
+                const spinAngle = rSpin * Math.PI * 2 + t * (0.12 + rRadius * 0.18) * (rSpinDir > 0.5 ? 1 : -1);
+
+                // A blob's gradient only actually depends on its radius (fixed
+                // per index) and its color (constant except mid palette-
+                // transition), never on position/rotation/scale - those are
+                // applied via the canvas transform at draw time. So the
+                // gradient itself is cached per index instead of rebuilt from
+                // scratch 14 times every single frame.
+                const color = effectivePalette[k % n];
+                let cached = blobGradientCache[k];
+                if (!cached || cached.radius !== blobR || cached.color !== color) {
+                    const grad = blobLayerCtx.createRadialGradient(0, 0, 0, 0, 0, blobR);
+                    const { r: cr, g: cg, b: cb } = hexToRgb(color);
+                    grad.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, 1)`);
+                    grad.addColorStop(0.4, `rgba(${cr}, ${cg}, ${cb}, 0.85)`);
+                    grad.addColorStop(0.75, `rgba(${cr}, ${cg}, ${cb}, 0.4)`);
+                    grad.addColorStop(1, `rgba(${cr}, ${cg}, ${cb}, 0)`);
+                    cached = { radius: blobR, color, gradient: grad };
+                    blobGradientCache[k] = cached;
+                }
+
+                blobs.push({ gradient: cached.gradient, px, py, blobR, presence, stretchA, stretchB, spinAngle });
+            }
+
+            // Deliberately NOT sorted by presence: with normal alpha blending,
+            // draw order changes the resulting color in an overlap, so a sort
+            // key that changes continuously (presence) would flip two blobs'
+            // relative order the instant their presence values cross - an
+            // instant swap in an otherwise continuous system, which reads as a
+            // pop. Fixed draw order avoids that discontinuity entirely.
+            for (const blob of blobs) {
+                blobLayerCtx.save();
+                blobLayerCtx.translate(blob.px, blob.py);
+                blobLayerCtx.rotate(blob.spinAngle);
+                blobLayerCtx.scale(blob.stretchA, blob.stretchB);
+
+                blobLayerCtx.globalAlpha = blob.presence * (0.35 + 0.45 * intensity);
+                blobLayerCtx.fillStyle = blob.gradient;
+                // Beyond blobR the gradient is fully transparent and paints
+                // nothing, so filling further out than that is pure wasted
+                // work.
+                blobLayerCtx.fillRect(-blob.blobR, -blob.blobR, blob.blobR * 2, blob.blobR * 2);
+                blobLayerCtx.restore();
+            }
 
             bgCtx.globalAlpha = 1;
+            bgCtx.drawImage(blobLayerCanvas, 0, 0, width, height);
         }
 
         let animationTime = 0;
         let colorTime = 0;
+        let lastFrameTimestamp = null;
         function startBackgroundAnimation() {
-            function animate() {
-                animationTime += 16 * settings.bgSpeed;
-                colorTime += 16; // independent of Animation Speed: color timing is real-time only
+            // Advance by how much real time actually passed since the last
+            // painted frame, not a fixed assumed-60fps step. A fixed step
+            // looks stuttery the moment the device can't hold a steady frame
+            // rate (frames arrive irregularly, but motion would still jump by
+            // the same amount each time) - real elapsed time keeps motion
+            // smooth relative to the clock even when frame delivery isn't.
+            function animate(now) {
+                if (lastFrameTimestamp === null) lastFrameTimestamp = now;
+                const dt = Math.min(now - lastFrameTimestamp, 100); // clamp so a backgrounded/stalled tab doesn't jump on return
+                lastFrameTimestamp = now;
+                animationTime += dt * settings.bgSpeed;
+                colorTime += dt; // independent of Animation Speed: color timing is real-time only
                 drawAnimatedBackground(animationTime);
                 requestAnimationFrame(animate);
             }
-            animate();
+            requestAnimationFrame(animate);
         }
 
         const clockElement = document.getElementById('clock');
@@ -446,6 +748,7 @@
             locationLon: null,
             bgSpeed: 0.5,
             bgIntensity: 70,
+            showMoonRing: true,
             brightness: 128,
             autoBrightness: true,
             minBrightnessWhenLit: 100,
@@ -466,7 +769,7 @@
         function applySettings() { clockElement.style.fontFamily = settings.font; clockElement.style.fontSize = settings.fontSize + 'vw'; clockElement.style.fontWeight = settings.fontWeight; if (settings.useLocation && latitude !== null) updateClockColor(); else if (!settings.useLocation) clockElement.style.color = settings.dayColor; }
         function getSunTimes(lat, lon, date = new Date()) { const times = SunCalc.getTimes(date, lat, lon); return { sunrise: times.sunrise, sunset: times.sunset }; }
         function isNightTime(lat, lon) { if (!lat || !lon) return false; const now = new Date(); const sunTimes = getSunTimes(lat, lon, now); return now < sunTimes.sunrise || now > sunTimes.sunset; }
-        function updateClockColor() { if (!settings.useLocation || latitude === null || longitude === null) return; const newEveningMode = isNightTime(latitude, longitude); if (newEveningMode !== isEveningMode) { isEveningMode = newEveningMode; clockElement.style.color = isEveningMode ? settings.nightColor : settings.dayColor; } }
+        function updateClockColor() { if (!settings.useLocation || latitude === null || longitude === null) return; isEveningMode = isNightTime(latitude, longitude); clockElement.style.color = isEveningMode ? settings.nightColor : settings.dayColor; }
         function updateClock() { const now = new Date(); let hours = now.getHours(); const minutes = String(now.getMinutes()).padStart(2, '0'); const seconds = String(now.getSeconds()).padStart(2, '0'); if (settings.timeFormat === 12) { const ampm = hours >= 12 ? 'PM' : 'AM'; hours = hours % 12 || 12; hours = String(hours).padStart(2, '0'); } else { hours = String(hours).padStart(2, '0'); } let display = `${hours}:${minutes}`; if (settings.showSeconds) display += `:${seconds}`; clockElement.textContent = display; updateClockColor(); }
         function requestLocation() { if (!settings.useLocation) { statusElement.textContent = ''; return; } if (settings.locationLat && settings.locationLon) { latitude = settings.locationLat; longitude = settings.locationLon; statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); return; } if (navigator.geolocation) { navigator.geolocation.getCurrentPosition((position) => { latitude = position.coords.latitude; longitude = position.coords.longitude; settings.locationLat = latitude; settings.locationLon = longitude; saveSettings(); statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); }, () => { statusElement.textContent = ''; }); } }
         clockElement.addEventListener('touchend', (e) => { const now = Date.now(); if (now - lastTapTime < 300) { e.preventDefault(); openSettings(); } lastTapTime = now; });
@@ -521,6 +824,11 @@
             bgSpeedValue.textContent = settings.bgSpeed + 'x';
             syncSlider(bgSpeedSlider);
             bgSpeedSlider.oninput = (e) => { settings.bgSpeed = parseFloat(e.target.value); bgSpeedValue.textContent = settings.bgSpeed + 'x'; syncSlider(bgSpeedSlider); };
+
+            const moonRingToggle = document.getElementById('moonRingToggle');
+            moonRingToggle.classList.toggle('on', settings.showMoonRing);
+            moonRingToggle.setAttribute('aria-checked', settings.showMoonRing);
+            moonRingToggle.onclick = () => { settings.showMoonRing = !settings.showMoonRing; updateSettingsUI(); };
 
             const intensitySlider = document.getElementById('intensitySlider');
             const intensityValue = document.getElementById('intensityValue');
@@ -647,6 +955,7 @@
         
         // Start smooth brightness updates
         setInterval(updateBrightnessSmooth, 100);
+        setInterval(updateHiddenAccentColors, 100);
 
         function applyAutoBrightness() {
             if (!cordova || !cordova.plugins || !cordova.plugins.LightSensor) return;
@@ -654,6 +963,7 @@
                 cordova.plugins.LightSensor.start(
                     function(data) {
                         if (data && data.lux !== undefined) {
+                            currentLux = data.lux;
                             // Map lux (0-10000) to brightness (30-255)
                             let mapped = Math.floor(30 + (Math.min(data.lux, 10000) / 10000) * 225);
                             // Only let it fade all the way to minimum once the room is
@@ -688,6 +998,7 @@
         }, false);
 
         loadSettings(); clockElement.style.color = settings.dayColor; requestLocation(); requestFullscreen(); setInterval(updateClock, 1000); updateClock(); startBackgroundAnimation();
+        updateMoonFraction(); setInterval(updateMoonFraction, 10 * 60 * 1000);
     </script>
 </body>
 </html>
