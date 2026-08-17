@@ -470,7 +470,16 @@
         function updateClock() { const now = new Date(); let hours = now.getHours(); const minutes = String(now.getMinutes()).padStart(2, '0'); const seconds = String(now.getSeconds()).padStart(2, '0'); if (settings.timeFormat === 12) { const ampm = hours >= 12 ? 'PM' : 'AM'; hours = hours % 12 || 12; hours = String(hours).padStart(2, '0'); } else { hours = String(hours).padStart(2, '0'); } let display = `${hours}:${minutes}`; if (settings.showSeconds) display += `:${seconds}`; clockElement.textContent = display; updateClockColor(); }
         function requestLocation() { if (!settings.useLocation) { statusElement.textContent = ''; return; } if (settings.locationLat && settings.locationLon) { latitude = settings.locationLat; longitude = settings.locationLon; statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); return; } if (navigator.geolocation) { navigator.geolocation.getCurrentPosition((position) => { latitude = position.coords.latitude; longitude = position.coords.longitude; settings.locationLat = latitude; settings.locationLon = longitude; saveSettings(); statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); }, () => { statusElement.textContent = ''; }); } }
         clockElement.addEventListener('touchend', (e) => { const now = Date.now(); if (now - lastTapTime < 300) { e.preventDefault(); openSettings(); } lastTapTime = now; });
-        function openSettings() { settingsModal.classList.add('active'); updateSettingsUI(); }
+        // Some WebViews (e.g. this device's) fail to evaluate calc(length / length) inside
+        // custom properties, so --scale never resolves via CSS. Compute it in JS instead.
+        function applyPanelScale() {
+            const panel = document.querySelector('.panel');
+            if (!panel) return;
+            const panelD = panel.getBoundingClientRect().width;
+            if (panelD > 0) panel.style.setProperty('--scale', panelD / 300);
+        }
+        window.addEventListener('resize', applyPanelScale);
+        function openSettings() { settingsModal.classList.add('active'); applyPanelScale(); updateSettingsUI(); }
         function closeSettings() { settingsModal.classList.remove('active'); saveSettings(); applySettings(); requestLocation(); requestFullscreen(); }
         document.getElementById('closeSettings').addEventListener('click', closeSettings);
         document.getElementById('closeSettingsX').addEventListener('click', closeSettings);
