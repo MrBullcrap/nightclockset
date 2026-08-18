@@ -5,7 +5,8 @@
   "description": "Night clock app for Android",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "debug-console": "node tools/debug-console.js"
   },
   "keywords": [
     "ecosystem:cordova"
@@ -17,7 +18,8 @@
     "cordova-plugin-brightness": "file:plugins/brightness-control",
     "cordova-plugin-geolocation": "^4.1.0",
     "cordova-plugin-light-sensor": "file:plugins/light-sensor",
-    "cordova-plugin-screen": "file:plugins/screen-pin"
+    "cordova-plugin-screen": "file:plugins/screen-pin",
+    "ws": "^8.18.0"
   },
   "cordova": {
     "platforms": [

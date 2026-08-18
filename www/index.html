@@ -219,6 +219,10 @@
                         <div class="field-label">Moon Phase Ring<span class="field-sub">Glowing ring showing tonight's moon phase</span></div>
                         <button class="switch on" id="moonRingToggle" role="switch" aria-checked="true"><span class="knob"></span></button>
                     </div>
+                    <div class="row row-inline">
+                        <div class="field-label">Full Moon Only<span class="field-sub">Only show the ring when the moon is full</span></div>
+                        <button class="switch" id="moonRingFullOnlyToggle" role="switch" aria-checked="false"><span class="knob"></span></button>
+                    </div>
                     <div class="row">
                         <div class="row-top"><span class="field-label">Animation Speed</span><span id="bgSpeedValue" class="field-value mono">0.5x</span></div>
                         <input type="range" class="slider" id="bgSpeedSlider" min="0.5" max="3" step="0.5" value="0.5">
@@ -394,6 +398,7 @@
         }
 
         let currentLux = null;
+        let debugLuxOverride = null;   // set by the hidden debug console; null = use the real sensor
         let smoothedLux = null;       // heavily damped copy of currentLux, so a flickering
                                        // sensor reading can't flip the target pair back and forth
         let currentAccentColors = null; // the colors actually drawn, crossfaded toward the target
@@ -489,21 +494,186 @@
         // canvas per phase/size change, not redrawn every frame; the render loop
         // just alpha-blends that cached image with a slow breathing pulse.
         let moonFraction = 0;
+        let debugMoonFractionOverride = null; // set by the hidden debug console; null = use SunCalc
         let moonRingCanvas = null, moonRingCtx = null, moonRingDirty = true;
-        const MOON_RING_LAYERS = [
-            { width: 1.5, alpha: 0.6 },
-            { width: 6, alpha: 0.22 },
-            { width: 14, alpha: 0.09 },
-            { width: 26, alpha: 0.04 }
+        // Modeled on a real eclipse corona: the black disk is the Moon itself,
+        // light only ever escapes outward around its edge - never back onto
+        // the disk. So the disk is drawn well inside the screen circle,
+        // leaving genuine outward room for the corona instead of faking it by
+        // blooming inward over the clock face. Widths/radii are in px for a
+        // 480px-wide canvas.
+        //
+        // The corona itself isn't a smooth uniform halo - real coronal light
+        // travels outward along streamers, so it's built as a crisp, blown-out
+        // core ring hugging the disk (still and unpulsed) plus a field of
+        // individual rays shooting outward from it (see MOON_RAYS_PER_360 /
+        // computeMoonRays / drawMoonRays), each with its own random length,
+        // brightness and independent flicker so the field reads as light
+        // rather than a static shape.
+        // The true screen edge was confirmed on-device (not just assumed) to sit
+        // at exactly radius 240px from canvas center on this 480x480 round
+        // display - see fractions below as 215/240 and 240/240 accordingly.
+        const MOON_DISK_RADIUS_FRACTION = 220 / 240; // Moon disk radius, fraction of min(width,height)/2
+        const MOON_RAY_REACH_FRACTION = 240 / 240;   // rays are allowed to travel all the way to the confirmed true edge
+        const MOON_CORE_LAYERS = [
+            // A thin warm fleck right at the disk edge, under the white core -
+            // a nod to the pink/red chromosphere glow visible hugging the
+            // disk's edge in real eclipse photos.
+            { width: 1, alpha: 0.5, color: '255, 190, 175' },
+            { width: 3, alpha: 0.95, color: '210, 222, 255' },
+            // A little extra soft width right at the edge so the core doesn't
+            // hand off to the ray field with a hard step.
+            { width: 14, alpha: 0.12, color: '210, 222, 255' }
         ];
-        const MOON_RING_SEGMENTS = 72;
         const MOON_RING_FADE_FRACTION = 0.18;
+        // Purely a stylistic choice (this is a corona indicator, not a literal
+        // moon render) - the arc grows outward symmetrically from this point
+        // rather than sweeping from a fixed edge in one direction, which reads
+        // more clearly as "filling up" as the month goes on. South-East is
+        // clear of both the status text (top-left) and the clock digits.
+        const MOON_RING_ANCHOR_ANGLE = Math.PI / 4;
+        const MOON_FULL_THRESHOLD = 0.98; // illuminated fraction at/above which the ring's own edge-fade treats the phase as a closed loop rather than a fading arc
+
+        // "Full Moon Only" (below) needs to isolate a single calendar night,
+        // not a percentage cutoff - illumination changes too slowly near the
+        // peak for that to work (measured: >=98% held across ~4 consecutive
+        // nights around one real full moon). Instead this finds the actual
+        // instant of peak illumination nearest to now and checks whether
+        // tonight is the night it falls on, the same way a printed full-moon
+        // calendar states a single date. Hardcoded to Europe/Berlin rather
+        // than the device's own OS timezone (per explicit request) - nothing
+        // else in this app derives a timezone from location, so a fixed IANA
+        // zone is the only way to get a deterministic answer independent of
+        // whatever the device happens to be configured to.
+        const MOON_FULL_NIGHT_TIMEZONE = 'Europe/Berlin';
+
+        function localDateString(date, timeZone) {
+            return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+        }
+
+        // A sunset-to-sunrise night spans two calendar dates (crossing local
+        // midnight) - grouping by the plain calendar date would flip the
+        // match on/off right at midnight, mid-night. Shifting the midnight
+        // boundary to noon instead groups the whole night under the date its
+        // evening started on, matching how an almanac states "the night of
+        // the Nth".
+        function nightDateString(date, timeZone) {
+            return localDateString(new Date(date.getTime() - 12 * 3600 * 1000), timeZone);
+        }
+
+        // Searches both directions from `referenceDate` for the nearest peak
+        // illumination instant - a synodic month is ~29.53 days, so a +/-20
+        // day window always brackets exactly one full moon regardless of
+        // which side of it "now" falls on. Coarse-to-fine (6h then 1h steps)
+        // is more than enough precision to place it on the correct day.
+        function findNearestFullMoonInstant(referenceDate) {
+            const refT = referenceDate.getTime();
+            let bestT = refT, bestF = SunCalc.getMoonIllumination(referenceDate).fraction;
+            for (let h = -20 * 24; h <= 20 * 24; h += 6) {
+                const t = refT + h * 3600 * 1000;
+                const f = SunCalc.getMoonIllumination(new Date(t)).fraction;
+                if (f > bestF) { bestF = f; bestT = t; }
+            }
+            for (let h = -24; h <= 24; h++) {
+                const t = bestT + h * 3600 * 1000;
+                const f = SunCalc.getMoonIllumination(new Date(t)).fraction;
+                if (f > bestF) { bestF = f; bestT = t; }
+            }
+            return new Date(bestT);
+        }
+
+        let isFullMoonCalendarNight = false;
 
         function updateMoonFraction() {
-            if (typeof SunCalc === 'undefined') return;
-            const next = SunCalc.getMoonIllumination(new Date()).fraction;
+            const next = debugMoonFractionOverride !== null
+                ? debugMoonFractionOverride
+                : (typeof SunCalc === 'undefined' ? moonFraction : SunCalc.getMoonIllumination(new Date()).fraction);
             if (Math.abs(next - moonFraction) > 0.0005) moonRingDirty = true;
             moonFraction = next;
+
+            if (typeof SunCalc !== 'undefined') {
+                const now = new Date();
+                const nearestFull = findNearestFullMoonInstant(now);
+                isFullMoonCalendarNight = nightDateString(now, MOON_FULL_NIGHT_TIMEZONE) === nightDateString(nearestFull, MOON_FULL_NIGHT_TIMEZONE);
+            }
+        }
+
+        let moonDiskRadius = 0;
+        let moonRays = []; // recomputed alongside the core ring whenever moonRingDirty
+        const MOON_RAY_BLUR = 5; // px at a 480-wide canvas; softens ray edges so neighbors fade into each other instead of showing hard gaps
+        // 480 measured ~23fps even with the throttle+half-res optimizations
+        // below; there's a steep cliff somewhere around ~360-400 rays on
+        // this device (likely a GPU/compositor limit, not a JS cost - the
+        // throttled heavy-path JS time itself stays small). 300 measured a
+        // comfortable ~41fps with real margin.
+        const MOON_RAYS_PER_360 = 300;
+
+        // The stroke layer is rendered at this fraction of full resolution
+        // then upscaled - same trick already used for the animated blob
+        // background above (BLOB_RENDER_SCALE): a stroke covering the same
+        // visual area costs ~4x less to rasterize at half-res, and the blur
+        // pass that's already part of compositing hides the upscale
+        // softness for free.
+        const MOON_RAY_RENDER_SCALE = 0.5;
+        let moonRaysSmallCanvas = null, moonRaysSmallCtx = null; // raw strokes, half-res
+        let moonRaysCompositeCanvas = null, moonRaysCompositeCtx = null; // blurred + upscaled, full-res - this is what gets blitted every frame
+        let moonRaysLastUpdate = -Infinity;
+        // Each ray's own oscillation period is already ~30+ seconds
+        // (see `speed` below), so rebuilding the stroke layer this often
+        // rather than on every single animation frame is imperceptible as
+        // a rate change but cuts the expensive part of this effect
+        // (rasterizing hundreds of wide strokes) to a fraction of frames.
+        const MOON_RAYS_UPDATE_INTERVAL = 70; // ms, ~14 updates/sec
+        // Rays are allowed to run well past MOON_RAY_REACH_FRACTION's nominal
+        // band and simply clip at the canvas boundary - same as a real corona
+        // photo crops its outer streamers, and "big and dramatic" beats
+        // strictly staying inside the confirmed edge here.
+        const MOON_RAY_LENGTH_MULTIPLIER = 3;
+
+        // Deterministic per-ray base geometry/brightness, generated once per
+        // phase/size change - the actual per-frame animation (see
+        // updateMoonRaysComposite) grows and shrinks each ray's length and
+        // width together, and separately sways its angle left/right, all
+        // looping on their own random speed/phase. The ray's inner point
+        // stays clipped to the moon's edge circle (radius innerR) - sway
+        // slides that point a little around the circle rather than letting
+        // the ray drift free, which combined with independent growth reads
+        // like real sunrays/streamers shifting instead of a static comb.
+        // Because the angle moves every frame, x0/y0 and the gradient can't
+        // be cached like the core ring - each ray is genuinely recomputed
+        // per frame. Fewer, bigger rays (with a richer 3-stop gradient so
+        // each one reads as a soft, full streak rather than a thin line)
+        // keeps the total draw cost reasonable despite that.
+        function computeMoonRays(cx, cy, innerR, reach, sweep, startAngle, applyEdgeFade) {
+            const count = Math.max(4, Math.round(sweep / (Math.PI * 2) * MOON_RAYS_PER_360));
+            const angleStep = sweep / count;
+            const rays = [];
+            for (let i = 0; i < count; i++) {
+                const t = count === 1 ? 0.5 : i / (count - 1);
+                const jitter = (indexNoise(i, 3.71) - 0.5) * angleStep * 0.7;
+                const edgeFade = applyEdgeFade
+                    ? Math.max(0, Math.min(t / MOON_RING_FADE_FRACTION, (1 - t) / MOON_RING_FADE_FRACTION, 1))
+                    : 1;
+                const warm = indexNoise(i, 5.5) < 0.12;
+                rays.push({
+                    cx, cy, innerR,
+                    baseAngle: startAngle + sweep * t + jitter,
+                    // Sway amplitude is relative to the gap between neighboring
+                    // rays so it visibly wanders without regularly crossing
+                    // over multiple neighbors regardless of how dense the
+                    // field is.
+                    swayAmount: angleStep * (1.5 + indexNoise(i, 63.4) * 2.5),
+                    swaySpeed: 0.00035 + indexNoise(i, 27.1) * 0.00065,
+                    swayPhase: indexNoise(i, 8.62) * Math.PI * 2,
+                    maxLen: reach * (0.35 + indexNoise(i, 91.7) * 0.65),
+                    maxWidth: 6 + indexNoise(i, 15.9) * 14,
+                    baseAlpha: (0.16 + indexNoise(i, 47.3) * 0.34) * edgeFade,
+                    speed: 0.00012 + indexNoise(i, 12.98) * 0.00028,
+                    phase: indexNoise(i, 78.23) * Math.PI * 2,
+                    color: warm ? '255, 190, 175' : '210, 222, 255',
+                });
+            }
+            return rays;
         }
 
         function renderMoonRingCanvas(width, height) {
@@ -513,30 +683,137 @@
             moonRingCtx = moonRingCanvas.getContext('2d');
             const rctx = moonRingCtx;
 
-            const sweep = moonFraction * Math.PI * 2;
-            if (sweep <= 0.001) return;
+            const sweep = Math.min(moonFraction, 1) * Math.PI * 2;
+            if (sweep <= 0.001) { moonRays = []; return; }
 
             const cx = width / 2, cy = height / 2;
-            const radius = Math.min(width, height) / 2 * 0.94;
-            const startAngle = -Math.PI / 2;
-            const applyEdgeFade = moonFraction < 0.98;
+            const halfDim = Math.min(width, height) / 2;
+            moonDiskRadius = halfDim * MOON_DISK_RADIUS_FRACTION;
+            const startAngle = MOON_RING_ANCHOR_ANGLE - sweep / 2;
+            const applyEdgeFade = moonFraction < MOON_FULL_THRESHOLD;
 
             rctx.globalCompositeOperation = 'lighter';
-            rctx.lineCap = 'round';
 
-            MOON_RING_LAYERS.forEach(layer => {
-                for (let i = 0; i < MOON_RING_SEGMENTS; i++) {
-                    const t0 = i / MOON_RING_SEGMENTS, t1 = (i + 1) / MOON_RING_SEGMENTS, tMid = (t0 + t1) / 2;
-                    const edgeFade = applyEdgeFade ? Math.max(0, Math.min(tMid / MOON_RING_FADE_FRACTION, (1 - tMid) / MOON_RING_FADE_FRACTION, 1)) : 1;
-                    const alpha = layer.alpha * edgeFade;
-                    if (alpha <= 0.003) continue;
-                    rctx.beginPath();
-                    rctx.strokeStyle = `rgba(210, 222, 255, ${alpha})`;
-                    rctx.lineWidth = layer.width * (width / 480);
-                    rctx.arc(cx, cy, radius, startAngle + sweep * t0, startAngle + sweep * t1);
-                    rctx.stroke();
+            // A single conic-gradient stroke per layer instead of dozens of
+            // short round-capped segments: adjacent round caps overlapped
+            // under additive blending, each overlap point getting double the
+            // alpha contribution of its neighbors. One continuous stroke has
+            // no seams to begin with, and a conic gradient gives a perfectly
+            // smooth taper.
+            MOON_CORE_LAYERS.forEach(layer => {
+                const grad = rctx.createConicGradient(startAngle, cx, cy);
+                const at = (a) => `rgba(${layer.color}, ${a})`;
+                if (applyEdgeFade) {
+                    const fadeFrac = MOON_RING_FADE_FRACTION * moonFraction;
+                    grad.addColorStop(0, at(0));
+                    grad.addColorStop(Math.min(1, fadeFrac), at(layer.alpha));
+                    grad.addColorStop(Math.max(0, moonFraction - fadeFrac), at(layer.alpha));
+                    grad.addColorStop(Math.min(1, moonFraction), at(0));
+                } else {
+                    grad.addColorStop(0, at(layer.alpha));
+                    grad.addColorStop(Math.max(0, Math.min(1, moonFraction) - 0.001), at(layer.alpha));
+                    grad.addColorStop(Math.min(1, moonFraction), at(0));
                 }
+                rctx.beginPath();
+                rctx.strokeStyle = grad;
+                rctx.lineWidth = layer.width * (width / 480);
+                rctx.arc(cx, cy, moonDiskRadius, startAngle, startAngle + sweep);
+                rctx.stroke();
             });
+
+            const outerLimit = halfDim * MOON_RAY_REACH_FRACTION;
+            const reach = (outerLimit - moonDiskRadius) * MOON_RAY_LENGTH_MULTIPLIER;
+            moonRays = reach > 0 ? computeMoonRays(cx, cy, moonDiskRadius, reach, sweep, startAngle, applyEdgeFade) : [];
+        }
+
+        // The expensive part: stroke every ray into the small buffer, then
+        // blur+upscale it once into the cached composite. Only called when
+        // MOON_RAYS_UPDATE_INTERVAL has elapsed (see drawMoonRays), not on
+        // every animation frame.
+        function updateMoonRaysComposite(width, height, time) {
+            const scale = width / 480;
+            const sw = Math.max(1, Math.round(width * MOON_RAY_RENDER_SCALE));
+            const sh = Math.max(1, Math.round(height * MOON_RAY_RENDER_SCALE));
+
+            if (!moonRaysSmallCanvas || moonRaysSmallCanvas.width !== sw || moonRaysSmallCanvas.height !== sh) {
+                moonRaysSmallCanvas = document.createElement('canvas');
+                moonRaysSmallCanvas.width = sw;
+                moonRaysSmallCanvas.height = sh;
+                moonRaysSmallCtx = moonRaysSmallCanvas.getContext('2d');
+            } else {
+                moonRaysSmallCtx.clearRect(0, 0, sw, sh);
+            }
+
+            // Draw using full-resolution coordinates/widths - the transform
+            // does the downscaling, same pattern as ensureBlobLayer above.
+            moonRaysSmallCtx.setTransform(MOON_RAY_RENDER_SCALE, 0, 0, MOON_RAY_RENDER_SCALE, 0, 0);
+            moonRaysSmallCtx.globalCompositeOperation = 'lighter';
+            moonRaysSmallCtx.lineCap = 'round';
+            moonRays.forEach(ray => {
+                // One shared oscillation drives brightness, length and width
+                // together - a ray grows and brightens, then shrinks and
+                // dims, on its own random cycle. Never fully closes to zero
+                // so it reads as "breathing," not "blinking off".
+                const osc = 0.5 + 0.5 * Math.sin(time * ray.speed + ray.phase);
+                const growth = 0.3 + 0.7 * osc;
+                const alpha = ray.baseAlpha * (0.35 + 0.65 * osc);
+                if (alpha <= 0.004) return;
+                const len = ray.maxLen * growth;
+                if (len <= 0.5) return;
+                // Swaying angle, independent of the growth cycle above - the
+                // inner point stays clipped to the moon's edge circle, only
+                // sliding along it, so the ray always still meets the disk.
+                const angle = ray.baseAngle + ray.swayAmount * Math.sin(time * ray.swaySpeed + ray.swayPhase);
+                const cosA = Math.cos(angle), sinA = Math.sin(angle);
+                const x0 = ray.cx + cosA * ray.innerR, y0 = ray.cy + sinA * ray.innerR;
+                const x1 = x0 + cosA * len, y1 = y0 + sinA * len;
+                const grad = moonRaysSmallCtx.createLinearGradient(x0, y0, x1, y1);
+                grad.addColorStop(0, `rgba(${ray.color}, 1)`);
+                grad.addColorStop(0.45, `rgba(${ray.color}, 0.6)`);
+                grad.addColorStop(1, `rgba(${ray.color}, 0)`);
+                moonRaysSmallCtx.globalAlpha = alpha;
+                moonRaysSmallCtx.beginPath();
+                moonRaysSmallCtx.strokeStyle = grad;
+                moonRaysSmallCtx.lineWidth = ray.maxWidth * growth * scale;
+                moonRaysSmallCtx.moveTo(x0, y0);
+                moonRaysSmallCtx.lineTo(x1, y1);
+                moonRaysSmallCtx.stroke();
+            });
+            moonRaysSmallCtx.globalAlpha = 1;
+            moonRaysSmallCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+            if (!moonRaysCompositeCanvas || moonRaysCompositeCanvas.width !== width || moonRaysCompositeCanvas.height !== height) {
+                moonRaysCompositeCanvas = document.createElement('canvas');
+                moonRaysCompositeCanvas.width = width;
+                moonRaysCompositeCanvas.height = height;
+                moonRaysCompositeCtx = moonRaysCompositeCanvas.getContext('2d');
+            } else {
+                moonRaysCompositeCtx.clearRect(0, 0, width, height);
+            }
+            // Upscale and blur in the same draw call - the blur that makes
+            // neighboring rays fade into each other also hides the
+            // half-res upscale, so it's not an extra cost on top.
+            moonRaysCompositeCtx.filter = `blur(${MOON_RAY_BLUR * scale}px)`;
+            moonRaysCompositeCtx.drawImage(moonRaysSmallCanvas, 0, 0, width, height);
+            moonRaysCompositeCtx.filter = 'none';
+        }
+
+        // Individual outward streaks. Unlike the core ring this can't be
+        // cached for the phase's whole duration (each ray flickers/grows on
+        // its own cycle - see MOON_DISK_RADIUS_FRACTION comment above for
+        // why this replaced one whole-corona pulse), but it also doesn't
+        // need to be rebuilt on every single animation frame - see
+        // MOON_RAYS_UPDATE_INTERVAL and updateMoonRaysComposite above.
+        function drawMoonRays(width, height, time) {
+            if (!moonRays.length) return;
+            if (!moonRaysCompositeCanvas || time - moonRaysLastUpdate >= MOON_RAYS_UPDATE_INTERVAL) {
+                updateMoonRaysComposite(width, height, time);
+                moonRaysLastUpdate = time;
+            }
+            bgCtx.save();
+            bgCtx.globalCompositeOperation = 'lighter';
+            bgCtx.drawImage(moonRaysCompositeCanvas, 0, 0);
+            bgCtx.restore();
         }
 
         function drawMoonRing(width, height) {
@@ -544,11 +821,8 @@
                 renderMoonRingCanvas(width, height);
                 moonRingDirty = false;
             }
-            const pulse = 0.55 + 0.45 * Math.sin(colorTime * 0.0005);
-            bgCtx.save();
-            bgCtx.globalAlpha = pulse;
             bgCtx.drawImage(moonRingCanvas, 0, 0);
-            bgCtx.restore();
+            drawMoonRays(width, height, colorTime);
         }
 
         let blobGradientCache = [];
@@ -581,7 +855,12 @@
             if (isNight) {
                 bgCtx.fillStyle = '#000000';
                 bgCtx.fillRect(0, 0, width, height);
-                if (settings.showMoonRing) drawMoonRing(width, height);
+                // debugMoonFractionOverride !== null bypasses the calendar check
+                // during a debug session (same as other debug overrides bypassing
+                // their real-world equivalent) so .moon()/.moonPhase() still
+                // preview correctly regardless of what night it actually is.
+                const moonRingAllowedByPhase = !settings.moonRingFullOnly || debugMoonFractionOverride !== null || isFullMoonCalendarNight;
+                if (settings.showMoonRing && moonRingAllowedByPhase) drawMoonRing(width, height);
                 return;
             }
 
@@ -735,6 +1014,7 @@
         const statusElement = document.getElementById('status');
         const settingsModal = document.getElementById('settingsModal');
         let latitude = null, longitude = null, isEveningMode = false, lastTapTime = 0;
+        let debugNightOverride = null; // set by the hidden debug console; null = use the real sun times
         let settings = {
             font: "'Segoe UI', 'Trebuchet MS', sans-serif",
             fontSize: 39,
@@ -749,6 +1029,7 @@
             bgSpeed: 0.5,
             bgIntensity: 70,
             showMoonRing: true,
+            moonRingFullOnly: false,
             brightness: 128,
             autoBrightness: true,
             minBrightnessWhenLit: 100,
@@ -768,7 +1049,7 @@
         function saveSettings() { localStorage.setItem('nightClockSettings', JSON.stringify(settings)); }
         function applySettings() { clockElement.style.fontFamily = settings.font; clockElement.style.fontSize = settings.fontSize + 'vw'; clockElement.style.fontWeight = settings.fontWeight; if (settings.useLocation && latitude !== null) updateClockColor(); else if (!settings.useLocation) clockElement.style.color = settings.dayColor; }
         function getSunTimes(lat, lon, date = new Date()) { const times = SunCalc.getTimes(date, lat, lon); return { sunrise: times.sunrise, sunset: times.sunset }; }
-        function isNightTime(lat, lon) { if (!lat || !lon) return false; const now = new Date(); const sunTimes = getSunTimes(lat, lon, now); return now < sunTimes.sunrise || now > sunTimes.sunset; }
+        function isNightTime(lat, lon) { if (debugNightOverride !== null) return debugNightOverride; if (!lat || !lon) return false; const now = new Date(); const sunTimes = getSunTimes(lat, lon, now); return now < sunTimes.sunrise || now > sunTimes.sunset; }
         function updateClockColor() { if (!settings.useLocation || latitude === null || longitude === null) return; isEveningMode = isNightTime(latitude, longitude); clockElement.style.color = isEveningMode ? settings.nightColor : settings.dayColor; }
         function updateClock() { const now = new Date(); let hours = now.getHours(); const minutes = String(now.getMinutes()).padStart(2, '0'); const seconds = String(now.getSeconds()).padStart(2, '0'); if (settings.timeFormat === 12) { const ampm = hours >= 12 ? 'PM' : 'AM'; hours = hours % 12 || 12; hours = String(hours).padStart(2, '0'); } else { hours = String(hours).padStart(2, '0'); } let display = `${hours}:${minutes}`; if (settings.showSeconds) display += `:${seconds}`; clockElement.textContent = display; updateClockColor(); }
         function requestLocation() { if (!settings.useLocation) { statusElement.textContent = ''; return; } if (settings.locationLat && settings.locationLon) { latitude = settings.locationLat; longitude = settings.locationLon; statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); return; } if (navigator.geolocation) { navigator.geolocation.getCurrentPosition((position) => { latitude = position.coords.latitude; longitude = position.coords.longitude; settings.locationLat = latitude; settings.locationLon = longitude; saveSettings(); statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); }, () => { statusElement.textContent = ''; }); } }
@@ -829,6 +1110,11 @@
             moonRingToggle.classList.toggle('on', settings.showMoonRing);
             moonRingToggle.setAttribute('aria-checked', settings.showMoonRing);
             moonRingToggle.onclick = () => { settings.showMoonRing = !settings.showMoonRing; updateSettingsUI(); };
+
+            const moonRingFullOnlyToggle = document.getElementById('moonRingFullOnlyToggle');
+            moonRingFullOnlyToggle.classList.toggle('on', settings.moonRingFullOnly);
+            moonRingFullOnlyToggle.setAttribute('aria-checked', settings.moonRingFullOnly);
+            moonRingFullOnlyToggle.onclick = () => { settings.moonRingFullOnly = !settings.moonRingFullOnly; updateSettingsUI(); };
 
             const intensitySlider = document.getElementById('intensitySlider');
             const intensityValue = document.getElementById('intensityValue');
@@ -963,12 +1249,13 @@
                 cordova.plugins.LightSensor.start(
                     function(data) {
                         if (data && data.lux !== undefined) {
-                            currentLux = data.lux;
+                            const lux = debugLuxOverride !== null ? debugLuxOverride : data.lux;
+                            currentLux = lux;
                             // Map lux (0-10000) to brightness (30-255)
-                            let mapped = Math.floor(30 + (Math.min(data.lux, 10000) / 10000) * 225);
+                            let mapped = Math.floor(30 + (Math.min(lux, 10000) / 10000) * 225);
                             // Only let it fade all the way to minimum once the room is
                             // actually dark; any detectable light keeps a readable floor.
-                            if (data.lux > settings.darkLuxThreshold) {
+                            if (lux > settings.darkLuxThreshold) {
                                 mapped = Math.max(mapped, settings.minBrightnessWhenLit);
                             }
                             targetBrightness = mapped;
@@ -996,6 +1283,215 @@
                 );
             });
         }, false);
+
+        // ---------------------------------------------------------------
+        // Hidden debug console. Not linked from any on-device UI - reachable
+        // only by a JS debugger attached to this WebView (adb + Chrome
+        // DevTools Protocol, e.g. `chrome://inspect` or the tools/debug-
+        // console.js CLI shipped alongside this app). Every override here
+        // is a separate flag the real render/update code already checks
+        // (see debugNightOverride, debugMoonFractionOverride, debugLuxOverride)
+        // rather than replacing any function, so there's nothing to "un-patch".
+        // NightClockDebug.exit() clears all three and restores the exact
+        // settings snapshot taken when the debug session started.
+        window.NightClockDebug = (function() {
+            let started = false;
+            let settingsSnapshot = null;
+            let latSnapshot, lonSnapshot;
+            let cycleTimer = null;
+            let sundownTimer = null;
+
+            function begin() {
+                if (started) return;
+                started = true;
+                settingsSnapshot = JSON.parse(JSON.stringify(settings));
+                latSnapshot = latitude;
+                lonSnapshot = longitude;
+                // Both required for any override below to actually be visible,
+                // regardless of what's currently saved on the device.
+                settings.useLocation = true;
+                settings.showMoonRing = true;
+                settings.moonRingFullOnly = false;
+                if (latitude === null || longitude === null) { latitude = 52.0; longitude = 7.0; }
+                console.log('[NightClockDebug] session started - your real settings are snapshotted; call NightClockDebug.exit() when done');
+            }
+
+            function stopTimers() {
+                if (cycleTimer) { clearInterval(cycleTimer); cycleTimer = null; }
+                if (sundownTimer) { clearInterval(sundownTimer); sundownTimer = null; }
+            }
+
+            const MOON_PHASE_NAMES = {
+                new: 0, waxingCrescent: 0.25, firstQuarter: 0.5, waxingGibbous: 0.75,
+                full: 1, waningGibbous: 0.75, lastQuarter: 0.5, waningCrescent: 0.25
+            };
+
+            const api = {
+                night(on) {
+                    begin();
+                    debugNightOverride = on === undefined ? true : !!on;
+                    updateClock();
+                    console.log('[NightClockDebug] night =', debugNightOverride);
+                    return api;
+                },
+                day() { return api.night(false); },
+                clearNight() {
+                    debugNightOverride = null;
+                    updateClock();
+                    console.log('[NightClockDebug] night override cleared - using real sun times');
+                    return api;
+                },
+                moon(fraction) {
+                    begin();
+                    if (debugNightOverride !== true) { debugNightOverride = true; updateClock(); }
+                    debugMoonFractionOverride = Math.max(0, Math.min(1, fraction));
+                    moonFraction = debugMoonFractionOverride;
+                    moonRingDirty = true;
+                    console.log('[NightClockDebug] moon fraction =', debugMoonFractionOverride.toFixed(3), '(night mode forced on so you can see it)');
+                    return api;
+                },
+                moonPhase(name) {
+                    if (!(name in MOON_PHASE_NAMES)) {
+                        console.log('[NightClockDebug] unknown phase. Try one of:', Object.keys(MOON_PHASE_NAMES).join(', '));
+                        return api;
+                    }
+                    return api.moon(MOON_PHASE_NAMES[name]);
+                },
+                clearMoon() {
+                    debugMoonFractionOverride = null;
+                    moonRingDirty = true;
+                    console.log('[NightClockDebug] moon override cleared - using real moon phase');
+                    return api;
+                },
+                lux(value) {
+                    begin();
+                    debugLuxOverride = Math.max(0, value);
+                    // Apply immediately rather than waiting for the next real
+                    // sensor event to pick it up (which may not come at all if
+                    // auto-brightness happens to be off or the sensor is idle).
+                    currentLux = debugLuxOverride;
+                    console.log('[NightClockDebug] lux =', debugLuxOverride);
+                    return api;
+                },
+                clearLux() {
+                    debugLuxOverride = null;
+                    console.log('[NightClockDebug] lux override cleared - using real sensor');
+                    return api;
+                },
+                cycleDayNight(stepSeconds) {
+                    begin();
+                    stopTimers();
+                    let n = false;
+                    api.night(n);
+                    cycleTimer = setInterval(() => { n = !n; api.night(n); }, (stepSeconds || 5) * 1000);
+                    console.log('[NightClockDebug] cycling day/night every', stepSeconds || 5, 's - call stopCycle() to stop');
+                    return api;
+                },
+                cycleMoon(stepSeconds, step) {
+                    begin();
+                    stopTimers();
+                    let f = 0;
+                    const inc = step || 0.05;
+                    api.moon(f);
+                    cycleTimer = setInterval(() => { f = (f + inc) % 1; api.moon(f); }, (stepSeconds || 2) * 1000);
+                    console.log('[NightClockDebug] cycling moon phase 0->1 every', stepSeconds || 2, 's - call stopCycle() to stop');
+                    return api;
+                },
+                cycleLux(stepSeconds) {
+                    begin();
+                    stopTimers();
+                    let lo = true;
+                    api.lux(lo ? 9000 : 20);
+                    cycleTimer = setInterval(() => { lo = !lo; api.lux(lo ? 20 : 9000); }, (stepSeconds || 4) * 1000);
+                    console.log('[NightClockDebug] cycling lux every', stepSeconds || 4, 's - call stopCycle() to stop');
+                    return api;
+                },
+                simulateSundown(durationSeconds) {
+                    begin();
+                    stopTimers();
+                    const total = (durationSeconds || 20) * 1000;
+                    const startLux = 9000, endLux = 10;
+                    const startedAt = Date.now();
+                    api.day();
+                    api.lux(startLux);
+                    sundownTimer = setInterval(() => {
+                        const t = Math.min(1, (Date.now() - startedAt) / total);
+                        api.lux(startLux + (endLux - startLux) * t);
+                        if (t >= 1) {
+                            clearInterval(sundownTimer);
+                            sundownTimer = null;
+                            api.night(true);
+                            console.log('[NightClockDebug] sundown complete - night mode is now on');
+                        }
+                    }, 200);
+                    console.log('[NightClockDebug] simulating sundown over', durationSeconds || 20, 's');
+                    return api;
+                },
+                stopCycle() {
+                    stopTimers();
+                    console.log('[NightClockDebug] stopped cycling/simulation timers (overrides are still active - call exit() to fully restore)');
+                    return api;
+                },
+                status() {
+                    const s = {
+                        active: started,
+                        nightOverride: debugNightOverride,
+                        moonFractionOverride: debugMoonFractionOverride,
+                        luxOverride: debugLuxOverride,
+                        cycling: !!(cycleTimer || sundownTimer),
+                        // What the app is actually doing right now, whether that's
+                        // coming from an override or the real sensors/clock - this
+                        // is what a UI should render, the fields above are just why.
+                        effectiveNight: isNightTime(latitude, longitude),
+                        effectiveMoonFraction: moonFraction,
+                        effectiveLux: currentLux
+                    };
+                    console.log('[NightClockDebug]', JSON.stringify(s));
+                    return s;
+                },
+                help() {
+                    console.log([
+                        'NightClockDebug commands:',
+                        '  .day() / .night() / .clearNight()',
+                        '  .moon(0..1) / .moonPhase("new"|"waxingCrescent"|"firstQuarter"|"waxingGibbous"|"full"|"waningGibbous"|"lastQuarter"|"waningCrescent") / .clearMoon()',
+                        '  .lux(0..10000) / .clearLux()',
+                        '  .cycleDayNight(stepSeconds) / .cycleMoon(stepSeconds, step) / .cycleLux(stepSeconds)',
+                        '  .simulateSundown(durationSeconds)',
+                        '  .stopCycle()   - stop auto-cycling, keep current override values',
+                        '  .status()',
+                        '  .exit()        - stop everything and restore your real settings'
+                    ].join('\n'));
+                    return api;
+                },
+                exit() {
+                    stopTimers();
+                    debugNightOverride = null;
+                    debugMoonFractionOverride = null;
+                    debugLuxOverride = null;
+                    if (started && settingsSnapshot) {
+                        settings = JSON.parse(JSON.stringify(settingsSnapshot));
+                        latitude = latSnapshot;
+                        longitude = lonSnapshot;
+                        saveSettings();
+                        applySettings();
+                        updateClock();
+                    }
+                    // Clearing the override above doesn't by itself put the
+                    // real value back - moonFraction only otherwise refreshes
+                    // on its own 10-minute timer, so without this a session
+                    // that called .moon()/.moonPhase() leaves the ring
+                    // showing whatever phase was last tested until that timer
+                    // happens to fire.
+                    updateMoonFraction();
+                    moonRingDirty = true;
+                    started = false;
+                    settingsSnapshot = null;
+                    console.log('[NightClockDebug] session ended - settings restored to what they were before');
+                }
+            };
+
+            return api;
+        })();
 
         loadSettings(); clockElement.style.color = settings.dayColor; requestLocation(); requestFullscreen(); setInterval(updateClock, 1000); updateClock(); startBackgroundAnimation();
         updateMoonFraction(); setInterval(updateMoonFraction, 10 * 60 * 1000);
