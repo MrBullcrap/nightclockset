@@ -7,12 +7,52 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
     <script src="cordova.js"></script>
     <style>
+        @font-face { font-family: 'Creator Genius'; src: url('fonts/Creator Genius.ttf') format('truetype'); font-display: swap; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html { background: #000; }
         body { width: 100vw; height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; background-color: #000; font-family: 'Segoe UI', 'Trebuchet MS', sans-serif; overflow: hidden; touch-action: none; padding: 0; margin: 0; }
         #bgCanvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
-        #clock { text-align: center; line-height: 1; letter-spacing: 0.001em; transition: color 0.5s ease, font-family 0.3s ease, font-size 0.3s ease, font-weight 0.3s ease; user-select: none; -webkit-user-select: none; cursor: default; font-variant-numeric: tabular-nums; font-weight: 800; transform: scaleY(1.15); position: relative; z-index: 10; }
+        /* HH and MM are two flex items each pinned to exactly 50% of #clock's
+           (full-width) box, right/left-aligned against that shared boundary -
+           so the colon between them always sits at the true screen center,
+           regardless of which digits are showing. This can't be done by
+           just centering the "HH:MM" string as one block: not every font
+           actually honors font-variant-numeric: tabular-nums (confirmed on
+           the custom "Creator Genius" face - digit glyph widths measurably
+           differ), so unequal HH/MM widths would otherwise drag the whole
+           block's centered midpoint away from the colon itself. */
+        #clock { width: 100%; line-height: 1; letter-spacing: 0.001em; transition: color 0.5s ease, font-family 0.3s ease, font-size 0.3s ease, font-weight 0.3s ease, letter-spacing 0.3s ease; user-select: none; -webkit-user-select: none; cursor: default; font-variant-numeric: tabular-nums; font-weight: 800; position: relative; z-index: 10; }
+        /* The colon-centering correction (see updateClockCenterCorrection)
+           applies here, not on #clock - #clockSeconds is a sibling of this,
+           not a descendant, specifically so it does NOT inherit a shift
+           that's only correct for the right-aligned "HH:" text's own bearing
+           (confirmed necessary on-device: without this split, the seconds
+           row was consistently dragged ~20-40px off-center by the exact
+           amount of the colon's own correction, since transforms apply to
+           an element's whole rendered subtree). */
+        #clockHM { display: flex; width: 100%; transform: scaleY(1.15); transition: transform 0.3s ease; }
+        /* min-width:0 overrides the flex default (min-width:auto, i.e. "never
+           shrink below content size") - without it, a wide digit pair (e.g.
+           the font's own "0"/"8" glyphs measured wider than others) pushes
+           past its 50% share and drags the center boundary off true center
+           right back into the same problem this split layout exists to fix.
+           Any overflow this forces is directed away from center (right-align
+           overflows further left, left-align further right), so it can never
+           disturb the boundary itself. */
+        #clockHours { flex: 1 1 0; min-width: 0; text-align: right; }
+        #clockMinutes { flex: 1 1 0; min-width: 0; text-align: left; }
         #status { position: absolute; top: 20px; left: 20px; font-size: 2vw; opacity: 0.3; color: #888; }
+        /* Absolutely positioned against #clock (its containing block) rather
+           than stacked in normal flow, so its presence/height never affects
+           where #clock itself gets centered - toggling seconds must not
+           shift the main clock line. left:50%/translateX(-50%) centers it
+           under #clock's own box, which is itself centered under the HH:MM
+           colon (see #clock below). */
+        /* No transform transition here (unlike #clock): this recalculates
+           every second as the seconds digits change, and animating a value
+           that snaps every tick would look like a jitter, not a smooth
+           settle. */
+        #clockSeconds { position: absolute; top: 100%; left: 50%; transform: translateX(-50%) scaleY(1.15); margin-top: 0.15em; text-align: center; line-height: 1; opacity: 0.55; transition: color 0.5s ease, font-family 0.3s ease, font-size 0.3s ease, letter-spacing 0.3s ease; user-select: none; -webkit-user-select: none; cursor: default; font-variant-numeric: tabular-nums; z-index: 10; white-space: nowrap; }
 
         :root {
             --void: #0a0c12;
@@ -109,7 +149,7 @@
 <body>
     <canvas id="bgCanvas"></canvas>
     <div id="status"></div>
-    <div id="clock">--:--</div>
+    <div id="clock"><span id="clockHM"><span id="clockHours">--:</span><span id="clockMinutes">--</span></span><div id="clockSeconds">--</div></div>
     <div id="settingsModal">
         <div class="panel">
             <div class="panel-head">
@@ -148,6 +188,10 @@
                         </div>
                     </div>
                     <div class="row">
+                        <div class="row-top"><span class="field-label">Font Spacing</span><span id="fontSpacingValue" class="field-value mono">0.00em</span></div>
+                        <input type="range" class="slider" id="fontSpacingSlider" min="-0.05" max="0.15" step="0.01" value="0">
+                    </div>
+                    <div class="row">
                         <div class="row-top"><span class="field-label">Font Weight</span><span id="fontWeightValue" class="field-value mono">800</span></div>
                         <input type="range" class="slider" id="fontWeightSlider" min="100" max="900" step="100" value="800">
                     </div>
@@ -155,7 +199,7 @@
                         <div class="field-label">Font</div>
                         <div class="chip-group">
                             <button class="chip active" data-font="'Segoe UI', 'Trebuchet MS', sans-serif">Modern</button>
-                            <button class="chip" data-font="'Courier New', monospace">Mono</button>
+                            <button class="chip" data-font="'Creator Genius', 'Courier New', monospace">Mono</button>
                             <button class="chip" data-font="Georgia, serif">Serif</button>
                             <button class="chip" data-font="'Arial Black', sans-serif">Bold</button>
                         </div>
@@ -1011,6 +1055,10 @@
         }
 
         const clockElement = document.getElementById('clock');
+        const clockHMElement = document.getElementById('clockHM');
+        const clockHoursElement = document.getElementById('clockHours');
+        const clockMinutesElement = document.getElementById('clockMinutes');
+        const clockSecondsElement = document.getElementById('clockSeconds');
         const statusElement = document.getElementById('status');
         const settingsModal = document.getElementById('settingsModal');
         let latitude = null, longitude = null, isEveningMode = false, lastTapTime = 0;
@@ -1019,6 +1067,7 @@
             font: "'Segoe UI', 'Trebuchet MS', sans-serif",
             fontSize: 39,
             fontWeight: 800,
+            fontSpacing: 0,
             timeFormat: 24,
             showSeconds: true,
             dayColor: '#ffffff',
@@ -1047,11 +1096,120 @@
 
         function loadSettings() { const saved = localStorage.getItem('nightClockSettings'); if (saved) settings = { ...settings, ...JSON.parse(saved) }; applySettings(); }
         function saveSettings() { localStorage.setItem('nightClockSettings', JSON.stringify(settings)); }
-        function applySettings() { clockElement.style.fontFamily = settings.font; clockElement.style.fontSize = settings.fontSize + 'vw'; clockElement.style.fontWeight = settings.fontWeight; if (settings.useLocation && latitude !== null) updateClockColor(); else if (!settings.useLocation) clockElement.style.color = settings.dayColor; }
+        // The hour/minute split (see #clockHours/#clockMinutes above) puts
+        // the true center exactly at the LAYOUT box boundary between them -
+        // verified by measuring rendered screenshots pixel-by-pixel, that
+        // boundary itself does not move for any digit combination. But a
+        // glyph's visible ink doesn't necessarily reach its own layout box's
+        // edge: a character's side bearing (empty space baked into the font
+        // between its ink and its advance width) and the trailing gap that
+        // letter-spacing adds after the last character (there's nothing
+        // after it to balance) both shift the visible ink away from that
+        // boundary. Pixel-measured on device: ~38px off at fontSpacing=0.1em
+        // in the "Creator Genius" font - large enough to see, and it scales
+        // with fontSpacing and font size, so a hardcoded correction would
+        // silently drift wrong the moment either changes, or the font/size
+        // chip is switched. Measured instead via Canvas2D's
+        // actualBoundingBoxLeft/Right, which (unlike any DOM layout
+        // measurement) reports true glyph ink extents, using the exact
+        // font/size/weight/spacing currently in effect.
+        // This WebView's actualBoundingBoxLeft/Right rounds to whole CSS
+        // pixels for this custom @font-face when measured at its actual
+        // render size (confirmed on-device: querying at the real ~219px
+        // font size returned suspiciously round values like exactly 33 and
+        // 4, while `width` kept full float precision) - that's measurement
+        // quantization, not the font's real metrics. Measuring at a much
+        // larger multiple of the real size makes that same +/-1px rounding
+        // error a proportionally tiny fraction of the result, then dividing
+        // back down recovers a stable, precise value - confirmed by
+        // comparing 5x/10x/20x scale, which agree with each other to several
+        // decimal places (unlike the unscaled reading).
+        const GLYPH_MEASURE_SCALE = 10;
+        function measureGlyphBearing(text, fontSizePx) {
+            const canvas = measureGlyphBearing._canvas || (measureGlyphBearing._canvas = document.createElement('canvas'));
+            const mctx = canvas.getContext('2d');
+            mctx.font = `${settings.fontWeight} ${fontSizePx * GLYPH_MEASURE_SCALE}px ${settings.font}`;
+            const m = mctx.measureText(text);
+            const leftBearing = ((m.actualBoundingBoxLeft !== undefined) ? m.actualBoundingBoxLeft : 0) / GLYPH_MEASURE_SCALE;
+            const inkRight = ((m.actualBoundingBoxRight !== undefined) ? m.actualBoundingBoxRight : m.width) / GLYPH_MEASURE_SCALE;
+            const rightBearing = (m.width / GLYPH_MEASURE_SCALE) - inkRight;
+            return { leftBearing, rightBearing };
+        }
+
+        // Canvas2D's text shaping still doesn't produce identical metrics to
+        // the DOM's own layout/rendering path for this custom @font-face
+        // even once the quantization above is fixed (measured on-device:
+        // applying the raw de-quantized colon correction still undershot the
+        // target by ~37%, verified by pixel-measuring a screenshot's actual
+        // rendered position before and after). This factor corrects for that
+        // remaining gap between the two engines' shaping, not for anything
+        // about the current font/size/spacing values themselves - the rest
+        // of each formula below already scales correctly with those.
+        const CANVAS_TO_DOM_SHAPING_FACTOR = 1.582;
+
+        // #clockHours is right-aligned flush against the true center (see
+        // #clockHours/#clockMinutes above), so the colon's own trailing gap
+        // is the entire correction needed - shifting the whole element right
+        // moves the ink up to that boundary.
+        function updateClockCenterCorrection() {
+            const fontSizePx = (settings.fontSize / 100) * window.innerWidth;
+            const { rightBearing } = measureGlyphBearing(':', fontSizePx);
+            const letterSpacingGap = settings.fontSpacing * fontSizePx;
+            const correctionPx = (rightBearing + letterSpacingGap) * CANVAS_TO_DOM_SHAPING_FACTOR;
+            clockHMElement.style.transform = `translateX(${correctionPx}px) scaleY(1.15)`;
+        }
+
+        // #clockSeconds is centered (not right-aligned), which splits an
+        // asymmetric bearing differently: centering divides the run's total
+        // width (ink + both bearings) evenly, so only HALF of the imbalance
+        // between the trailing gap and the leading bearing ends up visible
+        // as an offset - not the full trailing gap like the right-aligned
+        // colon above. Recomputed every call since the seconds digits (and
+        // therefore their specific bearings) change every second, unlike the
+        // colon character which never changes.
+        function updateSecondsCenterCorrection(secondsText) {
+            const fontSizePx = (settings.fontSize * 0.35 / 100) * window.innerWidth;
+            const { leftBearing, rightBearing } = measureGlyphBearing(secondsText, fontSizePx);
+            const letterSpacingGap = settings.fontSpacing * fontSizePx;
+            const trailingGap = rightBearing + letterSpacingGap;
+            const correctionPx = ((trailingGap - leftBearing) / 2) * CANVAS_TO_DOM_SHAPING_FACTOR;
+            clockSecondsElement.style.transform = `translateX(calc(-50% + ${correctionPx}px)) scaleY(1.15)`;
+        }
+
+        function applySettings() {
+            clockElement.style.fontFamily = settings.font;
+            clockElement.style.fontSize = settings.fontSize + 'vw';
+            clockElement.style.fontWeight = settings.fontWeight;
+            clockElement.style.letterSpacing = settings.fontSpacing + 'em';
+            clockSecondsElement.style.fontFamily = settings.font;
+            clockSecondsElement.style.fontSize = (settings.fontSize * 0.35) + 'vw';
+            clockSecondsElement.style.letterSpacing = settings.fontSpacing + 'em';
+            updateClockCenterCorrection();
+            updateSecondsCenterCorrection(clockSecondsElement.textContent);
+            if (settings.useLocation && latitude !== null) updateClockColor();
+            else if (!settings.useLocation) { clockElement.style.color = settings.dayColor; clockSecondsElement.style.color = settings.dayColor; }
+        }
         function getSunTimes(lat, lon, date = new Date()) { const times = SunCalc.getTimes(date, lat, lon); return { sunrise: times.sunrise, sunset: times.sunset }; }
         function isNightTime(lat, lon) { if (debugNightOverride !== null) return debugNightOverride; if (!lat || !lon) return false; const now = new Date(); const sunTimes = getSunTimes(lat, lon, now); return now < sunTimes.sunrise || now > sunTimes.sunset; }
-        function updateClockColor() { if (!settings.useLocation || latitude === null || longitude === null) return; isEveningMode = isNightTime(latitude, longitude); clockElement.style.color = isEveningMode ? settings.nightColor : settings.dayColor; }
-        function updateClock() { const now = new Date(); let hours = now.getHours(); const minutes = String(now.getMinutes()).padStart(2, '0'); const seconds = String(now.getSeconds()).padStart(2, '0'); if (settings.timeFormat === 12) { const ampm = hours >= 12 ? 'PM' : 'AM'; hours = hours % 12 || 12; hours = String(hours).padStart(2, '0'); } else { hours = String(hours).padStart(2, '0'); } let display = `${hours}:${minutes}`; if (settings.showSeconds) display += `:${seconds}`; clockElement.textContent = display; updateClockColor(); }
+        function updateClockColor() { if (!settings.useLocation || latitude === null || longitude === null) return; isEveningMode = isNightTime(latitude, longitude); const color = isEveningMode ? settings.nightColor : settings.dayColor; clockElement.style.color = color; clockSecondsElement.style.color = color; }
+        function updateClock() {
+            const now = new Date();
+            let hours = now.getHours();
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            if (settings.timeFormat === 12) { hours = hours % 12 || 12; hours = String(hours).padStart(2, '0'); }
+            else { hours = String(hours).padStart(2, '0'); }
+            // Seconds render on their own centered line below, smaller, rather
+            // than appended after minutes - keeping them off the main line
+            // means the HH:MM colon stays pinned at true screen center and
+            // toggling seconds never shifts it or pushes the display wider.
+            clockHoursElement.textContent = `${hours}:`;
+            clockMinutesElement.textContent = minutes;
+            clockSecondsElement.textContent = seconds;
+            updateSecondsCenterCorrection(seconds);
+            clockSecondsElement.style.display = settings.showSeconds ? '' : 'none';
+            updateClockColor();
+        }
         function requestLocation() { if (!settings.useLocation) { statusElement.textContent = ''; return; } if (settings.locationLat && settings.locationLon) { latitude = settings.locationLat; longitude = settings.locationLon; statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); return; } if (navigator.geolocation) { navigator.geolocation.getCurrentPosition((position) => { latitude = position.coords.latitude; longitude = position.coords.longitude; settings.locationLat = latitude; settings.locationLon = longitude; saveSettings(); statusElement.textContent = `Location: ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`; updateClock(); }, () => { statusElement.textContent = ''; }); } }
         clockElement.addEventListener('touchend', (e) => { const now = Date.now(); if (now - lastTapTime < 300) { e.preventDefault(); openSettings(); } lastTapTime = now; });
         // Some WebViews (e.g. this device's) fail to evaluate calc(length / length) inside
@@ -1091,6 +1249,13 @@
 
         function updateSettingsUI() {
             document.querySelectorAll('[data-size]').forEach(btn => { btn.classList.remove('active'); if (parseInt(btn.dataset.size) === settings.fontSize) btn.classList.add('active'); btn.onclick = () => { settings.fontSize = parseInt(btn.dataset.size); updateSettingsUI(); applySettings(); }; });
+
+            const fontSpacingSlider = document.getElementById('fontSpacingSlider');
+            const fontSpacingValue = document.getElementById('fontSpacingValue');
+            fontSpacingSlider.value = settings.fontSpacing;
+            fontSpacingValue.textContent = settings.fontSpacing.toFixed(2) + 'em';
+            syncSlider(fontSpacingSlider);
+            fontSpacingSlider.oninput = (e) => { settings.fontSpacing = parseFloat(e.target.value); fontSpacingValue.textContent = settings.fontSpacing.toFixed(2) + 'em'; syncSlider(fontSpacingSlider); applySettings(); };
 
             const fontWeightSlider = document.getElementById('fontWeightSlider');
             const fontWeightValue = document.getElementById('fontWeightValue');
@@ -1493,7 +1658,19 @@
             return api;
         })();
 
-        loadSettings(); clockElement.style.color = settings.dayColor; requestLocation(); requestFullscreen(); setInterval(updateClock, 1000); updateClock(); startBackgroundAnimation();
+        loadSettings(); clockElement.style.color = settings.dayColor; clockSecondsElement.style.color = settings.dayColor; requestLocation(); requestFullscreen(); setInterval(updateClock, 1000); updateClock(); startBackgroundAnimation();
+        // On a cold app start, loadSettings()'s applySettings() call above can
+        // run before a custom @font-face is actually ready in Canvas2D's own
+        // font cache (confirmed on-device: DOM text already renders the
+        // custom font correctly by then, but a canvas measureText() call at
+        // that exact moment still measured against a fallback font, baking
+        // in a wrong one-time centering correction that nothing then
+        // recalculated). Re-running the correction once every font is
+        // confirmed loaded catches that case without affecting the common
+        // case where nothing was actually wrong.
+        if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(() => { updateClockCenterCorrection(); updateSecondsCenterCorrection(clockSecondsElement.textContent); });
+        }
         updateMoonFraction(); setInterval(updateMoonFraction, 10 * 60 * 1000);
     </script>
 </body>
